@@ -74,7 +74,6 @@ void population_distribution(Person *population)
 // After the population has been distributed: assignment of status to each person
 void population_initialization(Person *population)
 {
-
     int num_immune = (int)(NP * IMM);      // Number of immune individuals
     int num_infectious = (int)(NP * INFP); // Number of initially infectious individuals
     float Sth = (float)(ITH / BETA);       // Threshold susceptibility
@@ -82,38 +81,45 @@ void population_initialization(Person *population)
     // Seed for random number generation
     srand(time(NULL));
 
-    // Randomly shuffle the population: in order not to give to all the first people in the grid the same
-    // status, we shuffle each time the population, susbtituting each person with a random one
-    //(ensuring we are not repeating any substitution twice). In this way the immune and infected people will
-    // be randomly distributed over the grid and not concentrated in the same area.
+    // Randomly shuffle the population to avoid biases in assignment
     for (int i = NP - 1; i >= 0; i--)
     {
         int j = rand() % (i + 1);
         Person temp = population[i];
         population[i] = population[j];
         population[j] = temp;
+    }
 
-        // Assign susceptible status
-        if (i >= num_immune + num_infectious)
+    // Assign status and susceptibility to the shuffled population
+    for (int i = 0; i < NP; i++)
+    {
+        if (i < num_immune)
         {
-            population[i].state = 0;
-            population[i].susceptibility = assign_susceptibility(S_AVG, 0.1, Sth); // Gaussian susceptibility
-            if (population[i].susceptibility > 1)
-                population[i].susceptibility = 1;
-        }
-        // Assign infectious status
-        else if (i >= num_immune && i < num_immune + num_infectious)
-        {
-            population[i].state = 2;
-            population[i].incubation_days = INCUBATION_DAYS;
-            population[i].susceptibility = assign_susceptibility(S_AVG, 0.1, Sth); // Gaussian susceptibility
-            if (population[i].susceptibility > 1)
-                population[i].susceptibility = 1;
-        }
-        else
-        { // i<=num_immune: their susceptibility carries no information, they'll never get ill. S=0.
+            // Immune individuals, susceptibility = 0
             population[i].state = 1;
             population[i].susceptibility = 0;
+        }
+        else if (i < num_immune + num_infectious)
+        {
+            // Infectious individuals
+            population[i].state = 2;
+            population[i].incubation_days = INCUBATION_DAYS;
+        }
+        else
+        {
+            // Susceptible individuals
+            population[i].state = 0;
+        }
+
+        // For susceptible and infectious individuals, assign susceptibility
+        if (population[i].state == 0 || population[i].state == 2)
+        {
+            population[i].susceptibility = assign_susceptibility(S_AVG, 0.1, Sth);
+            // Ensure susceptibility does not exceed 1
+            if (population[i].susceptibility > 1)
+            {
+                population[i].susceptibility = 1;
+            }
         }
     }
 }
@@ -160,7 +166,7 @@ void check_infections(Person *population)
                     {
                         // Calculate infection probability
                         float infection_prob = BETA * population[i].susceptibility;
-                        if (infection_prob >= IRD)
+                        if (infection_prob >= ITH)
                         {
                             // Infect the person: buon recupero!
                             population[i].state = 2;
@@ -206,6 +212,18 @@ void update_disease_progression(Person *population)
 
 int main()
 {
-    printf("Everything works, grazie alla ceppa");
+    Person *population = (Person *)malloc(NP * sizeof(Person));
+
+    population_distribution(population);
+    population_initialization(population);
+
+    for (int day = 0; day < ND; day++)
+    {
+        move_population(population);
+        check_infections(population);
+        update_disease_progression(population);
+    }
+
+    free(population);
     return 0;
 }
