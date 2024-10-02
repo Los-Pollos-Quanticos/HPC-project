@@ -3,6 +3,8 @@
 #include <math.h>
 #include <time.h>
 
+//LEONARDO CAVALLI 0000854139 GRANDE GITHUB TOP NUMBER ONE
+
 /**Chiedere al prof:
  * Susceptibility, come distribuirla. Questo risulta più limitante. Gli immuni sono gli unici che hanno S<Sth?
  *                 come si tiene in considerazione di Savg?
