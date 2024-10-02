@@ -3,7 +3,7 @@
 #include <math.h>
 #include <time.h>
 
-//LEONARDO CAVALLI 0000854139 GRANDE GITHUB TOP NUMBER ONE
+//PROVO A INSERIRE COMMENTO FEDERICO MUSCARà
 
 /**Chiedere al prof:
  * Susceptibility, come distribuirla. Questo risulta più limitante. Gli immuni sono gli unici che hanno S<Sth?
