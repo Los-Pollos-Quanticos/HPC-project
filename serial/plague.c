@@ -1,10 +1,7 @@
-//HAMZA
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
 #include <time.h>
-
-//PROVO A INSERIRE COMMENTO FEDERICO MUSCARà
 
 /**Chiedere al prof:
  * Susceptibility, come distribuirla. Questo risulta più limitante. Gli immuni sono gli unici che hanno S<Sth?
