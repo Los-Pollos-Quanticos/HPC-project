@@ -17,13 +17,14 @@ void removePerson(Person *p)
         {
             AT(x, y).occupancy--;
 
-            if (AT(x, y).occupancy == 0)
+            if (AT(x, y).occupancy == 0 || i == AT(x, y).occupancy)
             {
                 AT(x, y).persons[i] = NULL;
             }
             else
             {
                 AT(x, y).persons[i] = AT(x, y).persons[AT(x, y).occupancy];
+                AT(x, y).persons[AT(x, y).occupancy] == NULL;
             }
             break;
         }

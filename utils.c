@@ -1,6 +1,7 @@
 #include "./utils.h"
 
 // Gaussian random number through Box-Muller transform
+// TODO: check that the distribution is a gaussian one
 float gaussian_random(float mean, float stddev)
 {
     float u = ((float)rand() / RAND_MAX);

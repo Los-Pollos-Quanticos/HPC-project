@@ -113,11 +113,8 @@ void simulate_one_day(Person *population)
                         if (!is_infected(neighbor) && !is_immune(neighbor))
                         {
                             float infectivity = BETA * neighbor->susceptibility;
-                            printf("Infectivity: %.2f, ITH: %.2f\n", infectivity, ITH);
                             if (infectivity > ITH)
                             {
-                                // print information about the infection
-                                printf("Infecting person at (%d, %d) from infected person at (%d, %d)\n", neighbor->x, neighbor->y, p->x, p->y);
                                 neighbor->incubation_days = INCUBATION_DAYS + 1; // new infection
                             }
                         }
