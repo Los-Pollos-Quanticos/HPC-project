@@ -47,6 +47,11 @@ bool is_infected(const Person *p)
     return p->incubation_days > 0;
 }
 
+bool is_newly_infected(const Person *p)
+{
+    return p->new_infected;
+}
+
 void print_daily_report(Person *population, int day)
 {
     int dead = 0;
@@ -73,9 +78,10 @@ void print_daily_report(Person *population, int day)
         {
             infected++;
 
-            if (p->incubation_days == INCUBATION_DAYS + 1)
+            if (is_newly_infected(p))
             {
                 new_infected++;
+                p->new_infected = false;
             }
         }
 
@@ -95,8 +101,8 @@ void print_daily_report(Person *population, int day)
     printf("\nDay %d Report:\n", day);
     printf("Alive: %d\n", alive);
     printf("Dead: %d\n", dead);
-    printf("Infected: %d\n", infected);
     printf("New Infected: %d\n", new_infected);
+    printf("Tot Infected: %d\n", infected);
     printf("Immune: %d\n", immune);
     printf("Average Susceptibility (non-immune): %.3f\n", avg_susceptibility);
 }

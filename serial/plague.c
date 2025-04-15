@@ -68,6 +68,7 @@ void init_population(Person *population)
         {
             p->susceptibility = gaussian_random(S_AVG, 0.1f);
             p->incubation_days = INCUBATION_DAYS + 1;
+            p->new_infected = false;
         }
         else // Susceptible
         {
@@ -93,7 +94,7 @@ void simulate_one_day(Person *population)
             continue;
 
         // spread infection
-        if (is_infected(p))
+        if (is_infected(p) && !is_newly_infected(p))
         {
             p->incubation_days--;
 
@@ -116,11 +117,13 @@ void simulate_one_day(Person *population)
                             if (infectivity > ITH)
                             {
                                 neighbor->incubation_days = INCUBATION_DAYS + 1; // new infection
+                                neighbor->new_infected = true;
                             }
                         }
                     }
                 }
             }
+            
         }
 
         // move randomly in an adjacent cell or stay still
@@ -187,9 +190,9 @@ int main()
     // simulation
     for (int day = 0; day < ND; day++)
     {
-        simulate_one_day(population);
         print_daily_report(population, day);
         print_occupancies_map(population);
+        simulate_one_day(population);
     }
 
     free(population);

@@ -9,7 +9,7 @@
 
 // Constants for simulation parameters
 #define NP 12             // Number of persons
-#define INFP 0.50         // Initial percentage of infected persons
+#define INFP 0.10         // Initial percentage of infected persons
 #define IMM 0.02          // Initial percentage of immune persons
 #define S_AVG 0.5         // Susceptibility average
 #define W 3               // Width of the grid
@@ -30,5 +30,6 @@ typedef struct
     int x, y;             // Position in the grid, if x < 0 or y < 0, the person is dead
     float susceptibility; // From 0 to 1, if 0 = immune otherwise susceptible
     int incubation_days;  // is 0 if not infected, > 0 if infected
+    bool new_infected;   // is true if the person was infected within day D
 } Person;
 #endif
