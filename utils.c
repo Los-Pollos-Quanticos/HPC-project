@@ -21,17 +21,6 @@ float gaussian_random(float mean, float stddev)
     return s;
 }
 
-void stats(Person *population)
-{
-    printf("Population details:\n");
-    for (int i = 0; i < NP; i++)
-    {
-        printf("Person %d: Position (%d, %d), Susceptibility %.2f, Dead %d, Incubation Days %d\n",
-               i, population[i].x, population[i].y, population[i].susceptibility,
-               is_dead(&population[i]), population[i].incubation_days);
-    }
-}
-
 bool is_dead(const Person *p)
 {
     return p->x < 0 && p->y < 0;
@@ -44,7 +33,7 @@ bool is_immune(const Person *p)
 
 bool is_infected(const Person *p)
 {
-    return p->incubation_days > 0;
+    return p->incubation_days > 0 && !is_dead(p);
 }
 
 bool is_newly_infected(const Person *p)
@@ -52,124 +41,35 @@ bool is_newly_infected(const Person *p)
     return p->new_infected;
 }
 
-void print_daily_report(Person *population, int day)
+void save_population(Person *population, int day)
 {
-    int dead = 0;
-    int infected = 0;
-    int immune = 0;
-    int alive = 0;
-    int new_infected = 0;
-    float susceptibility_sum = 0.0f;
-    int susceptible_count = 0;
+    char filename[32];
+    sprintf(filename, "./report/day_%03d.dat", day);
 
+    FILE *f = fopen(filename, "wb");
+    if (!f)
+        return;
+
+    int np_value = NP;
+    fwrite(&np_value, sizeof(int), 1, f);
     for (int i = 0; i < NP; i++)
     {
-        Person *p = &population[i];
-
-        if (is_dead(p))
-        {
-            dead++;
-            continue;
-        }
-
-        alive++;
-
-        if (is_infected(p))
-        {
-            infected++;
-
-            if (is_newly_infected(p))
-            {
-                new_infected++;
-                p->new_infected = false;
-            }
-        }
-
-        if (is_immune(p))
-            immune++;
+        int state;
+        if (is_dead(&population[i]))
+            state = DEAD;
+        else if (is_immune(&population[i]))
+            state = IMMUNE;
+        else if (is_infected(&population[i]))
+            state = INFECTED;
         else
-        {
-            susceptibility_sum += p->susceptibility;
-            susceptible_count++;
-        }
+            state = SUSCEPTIBLE;
+
+        PersonReport out = {
+            .x = population[i].x,
+            .y = population[i].y,
+            .state = state};
+        fwrite(&out, sizeof(PersonReport), 1, f);
     }
 
-    float avg_susceptibility = susceptible_count > 0
-                                   ? susceptibility_sum / susceptible_count
-                                   : 0.0f;
-
-    printf("\nDay %d Report:\n", day);
-    printf("Alive: %d\n", alive);
-    printf("Dead: %d\n", dead);
-    printf("New Infected: %d\n", new_infected);
-    printf("Tot Infected: %d\n", infected);
-    printf("Immune: %d\n", immune);
-    printf("Average Susceptibility (non-immune): %.3f\n", avg_susceptibility);
-}
-
-void print_occupancies_map(Person *population)
-{
-    printf("\nOccupancy map (number of people per grid cell):\n");
-    for (int x = 0; x < W; x++)
-    {
-        for (int y = 0; y < H; y++)
-        {
-            printf("%d ", AT(x, y).occupancy);
-        }
-        printf("\n");
-    }
-
-    // printf("\nOccupancy map of Immune persons:\n");
-    // for (int x = 0; x < W; x++)
-    // {
-    //     for (int y = 0; y < H; y++)
-    //     {
-    //         int count = 0;
-    //         for (int i = 0; i < NP; i++)
-    //         {
-    //             if (population[i].x == x && population[i].y == y && is_immune(&population[i]))
-    //             {
-    //                 count++;
-    //             }
-    //         }
-    //         printf("%d ", count);
-    //     }
-    //     printf("\n");
-    // }
-
-    // printf("\nOccupancy map of Infected persons:\n");
-    // for (int x = 0; x < W; x++)
-    // {
-    //     for (int y = 0; y < H; y++)
-    //     {
-    //         int count = 0;
-    //         for (int i = 0; i < NP; i++)
-    //         {
-    //             if (population[i].x == x && population[i].y == y && is_infected(&population[i]))
-    //             {
-    //                 count++;
-    //             }
-    //         }
-    //         printf("%d ", count);
-    //     }
-    //     printf("\n");
-    // }
-    // printf("\nOccupancy map of Susceptible persons:\n");
-    // for (int x = 0; x < W; x++)
-    // {
-    //     for (int y = 0; y < H; y++)
-    //     {
-    //         int count = 0;
-    //         for (int i = 0; i < NP; i++)
-    //         {
-    //             if (population[i].x == x && population[i].y == y && !is_immune(&population[i]) && !is_infected(&population[i]))
-    //             {
-    //                 count++;
-    //             }
-    //         }
-    //         printf("%d ", count);
-    //     }
-    //     printf("\n");
-    // }
-    printf("\n");
+    fclose(f);
 }
