@@ -24,7 +24,7 @@ void removePerson(Person *p)
             else
             {
                 AT(x, y).persons[i] = AT(x, y).persons[AT(x, y).occupancy];
-                AT(x, y).persons[AT(x, y).occupancy] == NULL;
+                AT(x, y).persons[AT(x, y).occupancy] = NULL;
             }
             break;
         }

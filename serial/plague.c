@@ -85,8 +85,13 @@ void init_population(Person *population)
     freeTList(available_coords);
 }
 
+// TODO: fix memory error when IRD is different from 1
 void simulate_one_day(Person *population)
 {
+    int max_num_new_infected = NP - (int)(NP * IMM);
+    Person **newly_infected = malloc(sizeof(Person *) * max_num_new_infected);
+    int newly_count = 0;
+
     for (int i = 0; i < NP; i++)
     {
         Person *p = &population[i];
@@ -94,13 +99,13 @@ void simulate_one_day(Person *population)
             continue;
 
         // spread infection
-        if (is_infected(p) && !is_newly_infected(p))
+        if (is_infected(p))
         {
             p->incubation_days--;
 
-            for (int dx = -1; dx <= 1; dx++)
+            for (int dx = -IRD; dx <= IRD; dx++)
             {
-                for (int dy = -1; dy <= 1; dy++)
+                for (int dy = -IRD; dy <= IRD; dy++)
                 {
                     int nx = p->x + dx;
                     int ny = p->y + dy;
@@ -116,14 +121,13 @@ void simulate_one_day(Person *population)
                             float infectivity = BETA * neighbor->susceptibility;
                             if (infectivity > ITH)
                             {
-                                neighbor->incubation_days = INCUBATION_DAYS + 1; // new infection
                                 neighbor->new_infected = true;
+                                newly_infected[newly_count++] = neighbor;
                             }
                         }
                     }
                 }
             }
-            
         }
 
         // move randomly in an adjacent cell or stay still
@@ -170,6 +174,14 @@ void simulate_one_day(Person *population)
             }
         }
     }
+
+    for (int i = 0; i < newly_count; i++)
+    {
+        Person *p = newly_infected[i];
+        p->new_infected = false;
+        p->incubation_days = INCUBATION_DAYS + 1;
+    }
+    free(newly_infected);
 }
 
 int main()
@@ -184,14 +196,11 @@ int main()
     srand(time(NULL));
 
     init_population(population);
-    // stats(population);
-    // print_occupancies_map(population);
 
     // simulation
     for (int day = 0; day < ND; day++)
     {
-        print_daily_report(population, day);
-        print_occupancies_map(population);
+        save_population(population, day);
         simulate_one_day(population);
     }
 
