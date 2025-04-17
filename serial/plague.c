@@ -68,13 +68,15 @@ void init_population(Person *population)
         {
             p->susceptibility = gaussian_random(S_AVG, 0.1f);
             p->incubation_days = INCUBATION_DAYS + 1;
-            p->new_infected = false;
         }
         else // Susceptible
         {
             p->susceptibility = gaussian_random(S_AVG, 0.1f);
             p->incubation_days = 0;
         }
+
+        // TODO: make test about it
+        //  p->new_infected = false;
 
         if (AT(t.x, t.y).occupancy == MAXP_CELL)
         {
