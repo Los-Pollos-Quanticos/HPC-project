@@ -4,22 +4,21 @@
 #include "../tupleList.h"
 #include "../occupancyMap.h"
 
+#define NTHREADS 12
+
 Cell *occupancy_map = NULL;
 
 void init_population(Person *population)
 {
-    // --- Check if population fits grid (NP <= W * H * MAXP_CELL) ---
     if (NP > W * H * MAXP_CELL)
     {
         printf("Error: Population size exceeds available space on the grid.\n");
-        exit(1); // Exits the program if the population size exceeds capacity
+        exit(1); 
     }
 
-    int i;
     int num_immune = (int)(NP * IMM);
     int num_infected = (int)(NP * INFP);
 
-    // --- Array with available coordinates and occupancy count ---
     occupancy_map = malloc(W * H * sizeof(Cell));
 
     if (occupancy_map == NULL)
@@ -29,31 +28,59 @@ void init_population(Person *population)
     }
 
     TList *available_coords = createTList(W * H);
-    for (int x = 0; x < W; x++)
+    int local_dim = (W * H) / NTHREADS + 1;
+
+    #pragma omp parallel
     {
-        for (int y = 0; y < H; y++)
+        TList* local_coords = createTList(local_dim);
+
+        #pragma omp for collapse(2) nowait
+        for (int x = 0; x < W; x++)
         {
-            addTuple(available_coords, x, y);
-            AT(x, y).occupancy = 0;
-            AT(x, y).persons = malloc(MAXP_CELL * sizeof(Person *));
-            if (AT(x, y).persons == NULL)
+            for (int y = 0; y < H; y++)
             {
-                fprintf(stderr, "Failed to allocate persons array for cell %d\n", i);
-                exit(1);
+                addTuple(local_coords, x, y);
+                AT(x, y).occupancy = 0;
+                AT(x, y).persons = malloc(MAXP_CELL * sizeof(Person *));
+                if (AT(x, y).persons == NULL)
+                {
+                    fprintf(stderr, "Failed to allocate persons array for cell (%d,%d)\n", x, y);
+                    exit(1);
+                }
             }
         }
+
+        //Each thread separately now will do:
+        #pragma omp critical
+        {
+            for (int i = 0; i < local_coords->size; i++)
+            {
+                addTuple(available_coords, local_coords->data[i].x, local_coords->data[i].y);
+            }
+        }
+
+        freeTList(local_coords);
     }
+  
 
     // --- Initialize persons ---
-    for (i = 0; i < NP; i++)
+    #pragma omp parallel for
+    for (int i = 0; i < NP; i++)
     {
         Person *p = &population[i];
         Tuple t;
-        int idx = getRandomTupleIndex(available_coords, &t);
+
+        int idx;
+        #pragma omp critical
+        {
+            idx = getRandomTupleIndex(available_coords, &t);
+        }
 
         p->x = t.x;
         p->y = t.y;
+        
         addPerson(p, t.x, t.y);
+        
 
         int role = 2; // Default to susceptible
         if (i < num_immune)
@@ -94,12 +121,9 @@ void simulate_one_day(Person *population)
     Person **newly_infected = malloc(sizeof(Person *) * max_num_new_infected);
     int newly_count = 0;
 
-    #pragma omp parallel
+    #pragma omp parallel  //Is it necessary??
     {
-        Person **thread_newly_infected = malloc(sizeof(Person *) * max_num_new_infected);
-        int thread_newly_count = 0;
-
-        #pragma omp for nowait
+        #pragma omp for schedule(guided)
         for (int i = 0; i < NP; i++)
         {
             Person *p = &population[i];
@@ -122,16 +146,22 @@ void simulate_one_day(Person *population)
 
                         for (int j = 0; j < AT(nx, ny).occupancy; j++)
                         {
-                            Person *neighbor = AT(nx, ny).persons[j];
-                            if (!is_infected(neighbor) && !is_immune(neighbor))
+                            #pragma omp critical
                             {
-                                float infectivity = BETA * neighbor->susceptibility;
-                                if (infectivity > ITH)
+                                Person *neighbor = AT(nx, ny).persons[j];
+                                
+                                if (!is_infected(neighbor) && !is_immune(neighbor))
                                 {
-                                    neighbor->new_infected = true;
-                                    thread_newly_infected[thread_newly_count++] = neighbor;
+                                    float infectivity = BETA * neighbor->susceptibility;
+                                    if (infectivity > ITH)
+                                    {
+                                        neighbor->new_infected = true;
+                                        newly_infected[newly_count++] = neighbor;
+                                    }
                                 }
                             }
+
+                            
                         }
                     }
                 }
@@ -144,15 +174,16 @@ void simulate_one_day(Person *population)
             int new_y = p->y + dy;
 
             bool xy_valid = new_x >= 0 && new_x < W && new_y >= 0 && new_y < H;
-            bool occupancy_valid = xy_valid && AT(new_x, new_y).occupancy < MAXP_CELL;
 
-            if (occupancy_valid)
+            #pragma omp critical
             {
-                #pragma omp critical
+                bool occupancy_valid = AT(new_x, new_y).occupancy < MAXP_CELL;
+    
+                if (xy_valid && occupancy_valid)
                 {
                     movePerson(p, new_x, new_y);
                     p->x = new_x;
-                    p->y = new_y;
+                    p->y = new_y;                
                 }
             }
 
@@ -176,23 +207,15 @@ void simulate_one_day(Person *population)
                 }
             }
         }
+    
 
-        #pragma omp critical
+        #pragma omp parallel for
+        for (int i = 0; i < newly_count; i++)
         {
-            for (int i = 0; i < thread_newly_count; i++)
-            {
-                newly_infected[newly_count++] = thread_newly_infected[i];
-            }
+            Person *p = newly_infected[i];
+            p->new_infected = false;
+            p->incubation_days = INCUBATION_DAYS + 1;
         }
-
-        free(thread_newly_infected);
-    }
-
-    for (int i = 0; i < newly_count; i++)
-    {
-        Person *p = newly_infected[i];
-        p->new_infected = false;
-        p->incubation_days = INCUBATION_DAYS + 1;
     }
 
     free(newly_infected);
@@ -201,6 +224,8 @@ void simulate_one_day(Person *population)
 
 int main()
 {
+    omp_set_num_threads(NTHREADS);
+
     Person *population = (Person *)malloc(NP * sizeof(Person));
 
     if (population == NULL)
