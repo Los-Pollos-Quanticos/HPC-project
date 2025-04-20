@@ -68,13 +68,15 @@ void init_population(Person *population)
         {
             p->susceptibility = gaussian_random(S_AVG, 0.1f);
             p->incubation_days = INCUBATION_DAYS + 1;
-            p->new_infected = false;
         }
         else // Susceptible
         {
             p->susceptibility = gaussian_random(S_AVG, 0.1f);
             p->incubation_days = 0;
         }
+
+        // TODO: make test about it
+        //  p->new_infected = false;
 
         if (AT(t.x, t.y).occupancy == MAXP_CELL)
         {
@@ -85,7 +87,6 @@ void init_population(Person *population)
     freeTList(available_coords);
 }
 
-// TODO: fix memory error when IRD is different from 1
 void simulate_one_day(Person *population)
 {
     int max_num_new_infected = NP - (int)(NP * IMM);
@@ -113,10 +114,11 @@ void simulate_one_day(Person *population)
                     if (nx < 0 || nx >= W || ny < 0 || ny >= H)
                         continue;
 
-                    for (int j = 0; j < AT(nx, ny).occupancy; j++)
+                    Cell *cell = &AT(nx, ny);
+                    for (int j = 0; j < cell->occupancy; j++)
                     {
-                        Person *neighbor = AT(nx, ny).persons[j];
-                        if (!is_infected(neighbor) && !is_immune(neighbor))
+                        Person *neighbor = cell->persons[j];
+                        if (!is_infected(neighbor) && !is_immune(neighbor) && !neighbor->new_infected)
                         {
                             float infectivity = BETA * neighbor->susceptibility;
                             if (infectivity > ITH)
