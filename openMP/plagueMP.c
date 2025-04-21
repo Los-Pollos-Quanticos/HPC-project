@@ -50,7 +50,7 @@ void init_population(Person *population)
             }
         }
 
-        //Each thread separately now will do:
+        //Each thread will now separately do:
         #pragma omp critical
         {
             for (int i = 0; i < local_coords->size; i++)
@@ -114,109 +114,130 @@ void init_population(Person *population)
     freeTList(available_coords);
 }
 
-// TODO: fix memory error when IRD is different from 1
+
+/*rand() is not guaranteed to be thread-safe.
+POSIX offered a thread-safe version of rand called rand_r, 
+which is obsolete in favor of the drand48 family of functions.
+This version uses with rand_r since VSCode on Windows uses doesn’t 
+find the full definition of "struct drand48_data" */
+
 void simulate_one_day(Person *population)
 {
     int max_num_new_infected = NP - (int)(NP * IMM);
     Person **newly_infected = malloc(sizeof(Person *) * max_num_new_infected);
     int newly_count = 0;
 
-    #pragma omp parallel  //Is it necessary??
-    {
-        #pragma omp for schedule(guided)
-        for (int i = 0; i < NP; i++)
-        {
-            Person *p = &population[i];
-            if (is_dead(p))
-                continue;
+    omp_lock_t cell_locks[W][H];
+    #pragma omp parallel for collapse(2)
+    for (int i = 0; i < W; i++)
+        for (int j = 0; j < H; j++)
+            omp_init_lock(&cell_locks[i][j]);
 
-            if (is_infected(p))
-            {
+    #pragma omp parallel
+    {
+        unsigned int seed = (unsigned int)(time(NULL) ^ omp_get_thread_num());
+        Person **local_newly_infected = malloc(sizeof(Person *) * max_num_new_infected);
+        int local_newly_count = 0;
+
+        #pragma omp for schedule(guided)
+        for (int i = 0; i < NP; i++) {
+            Person *p = &population[i];
+
+            if (is_dead(p)) continue;
+
+            if (is_infected(p)) {
                 p->incubation_days--;
 
-                for (int dx = -IRD; dx <= IRD; dx++)
-                {
-                    for (int dy = -IRD; dy <= IRD; dy++)
-                    {
+                for (int dx = -IRD; dx <= IRD; dx++) {
+                    for (int dy = -IRD; dy <= IRD; dy++) {
                         int nx = p->x + dx;
                         int ny = p->y + dy;
 
-                        if (nx < 0 || nx >= W || ny < 0 || ny >= H)
-                            continue;
+                        if (nx < 0 || nx >= W || ny < 0 || ny >= H) continue;
 
-                        for (int j = 0; j < AT(nx, ny).occupancy; j++)
-                        {
-                            #pragma omp critical
-                            {
-                                Person *neighbor = AT(nx, ny).persons[j];
-                                
-                                if (!is_infected(neighbor) && !is_immune(neighbor))
-                                {
-                                    float infectivity = BETA * neighbor->susceptibility;
-                                    if (infectivity > ITH)
-                                    {
-                                        neighbor->new_infected = true;
-                                        newly_infected[newly_count++] = neighbor;
-                                    }
+                        omp_set_lock(&cell_locks[nx][ny]);
+
+                        for (int j = 0; j < AT(nx, ny).occupancy; j++) {
+                            Person *neighbor = AT(nx, ny).persons[j];
+                            if (!is_infected(neighbor) && !is_immune(neighbor)) {
+                                float infectivity = BETA * neighbor->susceptibility;
+                                if (infectivity > ITH) {
+                                    neighbor->new_infected = true;
+                                    local_newly_infected[local_newly_count++] = neighbor;
                                 }
                             }
-
-                            
                         }
+
+                        omp_unset_lock(&cell_locks[nx][ny]);
                     }
                 }
             }
 
-            int dx = (rand() % 3) - 1;
-            int dy = (rand() % 3) - 1;
-
+            int dx = (rand_r(&seed) % 3) - 1;
+            int dy = (rand_r(&seed) % 3) - 1;
             int new_x = p->x + dx;
             int new_y = p->y + dy;
 
             bool xy_valid = new_x >= 0 && new_x < W && new_y >= 0 && new_y < H;
 
-            #pragma omp critical
-            {
+            if (xy_valid) {
+                omp_set_lock(&cell_locks[new_x][new_y]);
                 bool occupancy_valid = AT(new_x, new_y).occupancy < MAXP_CELL;
-    
-                if (xy_valid && occupancy_valid)
-                {
+
+                if (occupancy_valid) {
                     movePerson(p, new_x, new_y);
                     p->x = new_x;
-                    p->y = new_y;                
+                    p->y = new_y;
                 }
+
+                omp_unset_lock(&cell_locks[new_x][new_y]);
             }
 
-            if (p->incubation_days == 1)
-            {
-                float prob = (float)rand() / RAND_MAX;
-                if (prob < MU)
-                {
+            // Infection resolution
+            if (p->incubation_days == 1) {
+                float prob = (float)rand_r(&seed) / RAND_MAX;
+
+                if (prob < MU) {
                     p->incubation_days = 0;
-                    if (rand() % 2 == 0)
+
+                    if (rand_r(&seed) % 2 == 0)
                         p->susceptibility = 0.0f;
-                }
-                else
-                {
-                    #pragma omp critical
-                    {
-                        removePerson(p);
-                        p->x = -1;
-                        p->y = -1;
-                    }
+
+                } else {
+                    omp_set_lock(&cell_locks[p->x][p->y]);
+
+                    removePerson(p);
+                    omp_unset_lock(&cell_locks[p->x][p->y]);
+                    p->x = -1;
+                    p->y = -1;
                 }
             }
         }
-    
 
-        #pragma omp parallel for
-        for (int i = 0; i < newly_count; i++)
+        #pragma omp critical
         {
+            for (int i = 0; i < local_newly_count; i++)
+                newly_infected[newly_count++] = local_newly_infected[i];
+        }
+
+        free(local_newly_infected);
+    }
+
+    #pragma omp parallel
+    {
+        #pragma omp for
+        for (int i = 0; i < newly_count; i++) {
             Person *p = newly_infected[i];
             p->new_infected = false;
             p->incubation_days = INCUBATION_DAYS + 1;
         }
-    }
+    
+        #pragma omp for collapse(2)
+        for (int i = 0; i < W; i++)
+            for (int j = 0; j < H; j++)
+                omp_destroy_lock(&cell_locks[i][j]);
+        
+    }   
 
     free(newly_infected);
 }
