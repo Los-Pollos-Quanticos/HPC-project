@@ -4,7 +4,7 @@
 #include "./config.h"
 #include "./occupancyMap.h"
 
-float gaussian_random(float mean, float stddev);
+float gaussian_random(unsigned int seed, float mean, float stddev);
 void print_grid(Person *population);
 
 bool is_dead(const Person *p);

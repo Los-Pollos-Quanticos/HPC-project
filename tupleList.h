@@ -23,7 +23,7 @@ void addTuple(TList *arr, int x, int y);
 
 void removeTupleAt(TList *arr, int index);
 
-int getRandomTupleIndex(TList *arr, Tuple *out);
+int getRandomTupleIndex(unsigned int seed, TList *arr, Tuple *out);
 
 void freeTList(TList *list);
 #endif

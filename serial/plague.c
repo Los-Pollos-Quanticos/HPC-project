@@ -207,6 +207,6 @@ int main()
     }
 
     free(population);
-    free(occupancy_map);
+    freeOccupancyMap();
     occupancy_map = NULL;
 }

@@ -2,10 +2,10 @@
 
 // Gaussian random number through Box-Muller transform
 // TODO: check that the distribution is a gaussian one
-float gaussian_random(float mean, float stddev)
+float gaussian_random(unsigned int seed, float mean, float stddev)
 {
-    float u = ((float)rand() / RAND_MAX);
-    float v = ((float)rand() / RAND_MAX);
+    float u = ((float)rand_r(&seed) / RAND_MAX);
+    float v = ((float)rand_r(&seed) / RAND_MAX);
     float s = mean + stddev * sqrt(-2.0f * log(u)) * cos(2.0f * M_PI * v);
 
     if (s < 0.0f)

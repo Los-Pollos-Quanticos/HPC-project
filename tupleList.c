@@ -30,12 +30,12 @@ void removeTupleAt(TList *arr, int index)
     arr->size--;
 }
 
-int getRandomTupleIndex(TList *arr, Tuple *out)
+int getRandomTupleIndex(unsigned int seed, TList *arr, Tuple *out)
 {
     if (arr->size == 0)
         return -1;
 
-    int idx = rand() % arr->size;
+    int idx = rand_r(&seed) % arr->size;
     *out = arr->data[idx];
     return idx;
 }
