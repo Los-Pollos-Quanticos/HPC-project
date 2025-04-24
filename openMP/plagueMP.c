@@ -4,7 +4,7 @@
 #include "../tupleList.h"
 #include "../occupancyMap.h"
 
-#define NTHREADS 8
+#define NTHREADS 4
 
 Cell *occupancy_map = NULL;
 
@@ -15,6 +15,8 @@ This version uses rand_r.*/
 
 void init_population(Person *population)
 {
+
+    printf("------ INIT POPULATION DEBUG ------\n");
     if (NP > W * H * MAXP_CELL)
     {
         printf("Error: Population size exceeds available space on the grid.\n");
@@ -30,6 +32,10 @@ void init_population(Person *population)
 
     int num_immune = (int)(NP * IMM);
     int num_infected = (int)(NP * INFP);
+
+    //print #cells #persons and #threads too
+    printf("Number of cells: %d, Number of persons: %d, Number of threads: %d\n", W * H, NP, NTHREADS);
+    printf("Number of immune: %d, infected: %d\n", num_immune, num_infected);
 
     #pragma omp parallel for collapse(2)
     for (int x = 0; x < W; x++)
@@ -57,7 +63,7 @@ void init_population(Person *population)
 
     for (int i = 0; i < NTHREADS; ++i)
         cells_per_thread[i] = total_cells / NTHREADS + (i < total_cells % NTHREADS ? 1 : 0);
-
+    
     //Videocall calculations
     int assigned_people = 0;
     int assigned_immune = 0;
@@ -86,8 +92,8 @@ void init_population(Person *population)
         assigned_infected += infected_per_thread[i];
     }
 
-    // We have now remaining people to assign, the immune and the infected too
 
+    // We have now remaining people to assign, the immune and the infected too
     int remaining_people = NP - assigned_people;
     int remaining_immune = num_immune - assigned_immune;
     int remaining_infected = num_infected - assigned_infected;
@@ -117,6 +123,21 @@ void init_population(Person *population)
         }
     }
 
+    //print final arrays 
+    printf("\nFinal cells_per_thread: ");
+    for (int i = 0; i < NTHREADS; ++i)
+        printf("%d ", cells_per_thread[i]);
+    printf("\nFinal people_per_thread: ");
+    for (int i = 0; i < NTHREADS; ++i)
+        printf("%d ", people_per_thread[i]);
+    printf("\nFinal immune_per_thread: ");
+    for (int i = 0; i < NTHREADS; ++i)
+        printf("%d ", immune_per_thread[i]);
+    printf("\nFinal infected_per_thread: ");
+    for (int i = 0; i < NTHREADS; ++i)
+        printf("%d ", infected_per_thread[i]);
+    printf("\n");
+
     // To this point each thread knows how many persons to accomodate
     cell_offset[0] = people_offset[0] = 0;
     for (int i = 1; i < NTHREADS; i++)
@@ -125,6 +146,15 @@ void init_population(Person *population)
         people_offset[i] = people_offset[i - 1] + people_per_thread[i - 1];
     }
 
+    //print the offsets arrays
+    printf("\nFinal cell_offset: ");
+    for (int i = 0; i < NTHREADS; ++i)
+        printf("%d ", cell_offset[i]);
+    printf("\nFinal people_offset: ");
+    for (int i = 0; i < NTHREADS; ++i)
+        printf("%d ", people_offset[i]);
+    printf("\n\n");
+    
     #pragma omp parallel
     {
         int tid = omp_get_thread_num();
@@ -144,6 +174,22 @@ void init_population(Person *population)
             addTuple(local_coords, x, y);
         }
 
+        //each thread print its local coordinates
+        #pragma omp critical
+        {
+            printf("Thread %d local coordinates: ", tid);
+            for (int i = 0; i < local_coords->size; i++)
+            {
+                printf("(%d, %d) ", local_coords->data[i].x, local_coords->data[i].y);
+            }
+            printf("\n");
+        }
+
+        //DEBUG
+        #pragma omp barrier
+        
+        int person_count = 0;
+
         for (int i = people_start; i < people_end; i++)
         {
             Person *p = &population[i];
@@ -153,13 +199,14 @@ void init_population(Person *population)
 
             p->x = t.x;
             p->y = t.y;
+            
             addPerson(p, t.x, t.y);
 
             // Role assignment
             int role = 2;
-            if (i < immune_per_thread[tid])
+            if (person_count < immune_per_thread[tid])
                 role = 0;
-            else if (i < immune_per_thread[tid] + infected_per_thread[tid])
+            else if (person_count < immune_per_thread[tid] + infected_per_thread[tid])
                 role = 1;
 
             if (role == 0) {
@@ -176,6 +223,9 @@ void init_population(Person *population)
 
             if (AT(t.x, t.y).occupancy == MAXP_CELL)
                 removeTupleAt(local_coords, idx);
+
+            printf("Thread %d adding person %d with days %d in (%d,%d)\n", tid, i, p->incubation_days, t.x, t.y);
+            person_count++;
         }
 
         freeTList(local_coords);
@@ -193,6 +243,7 @@ void init_population(Person *population)
 void simulate_one_day(Person *population)
 {
     int max_num_new_infected = NP - (int)(NP * IMM);
+    printf("Max number of infected: %d\n", max_num_new_infected);
 
     omp_lock_t cell_locks[W][H];
     #pragma omp parallel for collapse(2)
@@ -210,8 +261,12 @@ void simulate_one_day(Person *population)
         for (int i = 0; i < NP; i++) {
             Person *p = &population[i];
 
-            if (is_dead(p)) continue;
+            //DEBUG
+            //printf("Thread %d taking person %d with incubation days %d in (%d,%d)\n", omp_get_thread_num(), i, p->incubation_days, p->x, p->y); 
 
+            if (is_dead(p)) 
+                continue;
+            
             if (is_infected(p)) {
                 p->incubation_days--;
 
@@ -226,10 +281,11 @@ void simulate_one_day(Person *population)
 
                         for (int j = 0; j < AT(nx, ny).occupancy; j++) {
                             Person *neighbor = AT(nx, ny).persons[j];
-                            if (!is_infected(neighbor) && !is_immune(neighbor)) {
+                            if (!is_infected(neighbor) && !is_immune(neighbor) && !neighbor->new_infected) {
                                 float infectivity = BETA * neighbor->susceptibility;
                                 if (infectivity > ITH) {
                                     neighbor->new_infected = true;
+                                    printf("Person %d infected person %d in (%d,%d)\n", i, j, nx, ny);
                                     local_newly_infected[local_newly_count++] = neighbor;
                                 }
                             }
@@ -245,32 +301,57 @@ void simulate_one_day(Person *population)
             int new_x = p->x + dx;
             int new_y = p->y + dy;
 
-            bool xy_valid = new_x >= 0 && new_x < W && new_y >= 0 && new_y < H;
+            bool xy_valid = new_x >= 0 && new_x < W && new_y >= 0 && new_y < H && 
+                          (new_x != p->x || new_y != p->y);
+
+            // if (xy_valid) {
+            //     omp_set_lock(&cell_locks[new_x][new_y]);
+            //     bool occupancy_valid = AT(new_x, new_y).occupancy < MAXP_CELL;
+
+            //     if (occupancy_valid) {
+            //         omp_set_lock(&cell_locks[p->x][p->y]);
+            //         movePerson(p, new_x, new_y);
+            //         omp_unset_lock(&cell_locks[p->x][p->y]);
+            //         printf("Thread %d moved person %d from (%d,%d) to (%d,%d)\n", omp_get_thread_num(), i, p->x, p->y, new_x, new_y);
+            //         p->x = new_x;
+            //         p->y = new_y;
+            //     }
+
+            //     omp_unset_lock(&cell_locks[new_x][new_y]);
+            // }
 
             if (xy_valid) {
-                int first_x = p->x, first_y = p->y;
-                int second_x = new_x, second_y = new_y;
-
-                // TODO: FIX THE DEADLOCK
-                if (new_x < p->x || (new_x == p->x && new_y < p->y)) {
-                    first_x = new_x;
-                    first_y = new_y;
-                    second_x = p->x;
-                    second_y = p->y;
+                int x1 = p->x, y1 = p->y;
+                int x2 = new_x, y2 = new_y;
+            
+                bool lock_current_first = (x1 < x2) || (x1 == x2 && y1 < y2);
+            
+                if (lock_current_first) {
+                    omp_set_lock(&cell_locks[x1][y1]);
+                    omp_set_lock(&cell_locks[x2][y2]);
+                } else {
+                    omp_set_lock(&cell_locks[x2][y2]);
+                    omp_set_lock(&cell_locks[x1][y1]);
                 }
-
-                omp_set_lock(&cell_locks[first_x][first_y]);
-                omp_set_lock(&cell_locks[second_x][second_y]);
+            
                 bool occupancy_valid = AT(new_x, new_y).occupancy < MAXP_CELL;
-
+            
                 if (occupancy_valid) {
                     movePerson(p, new_x, new_y);
+                    printf("Thread %d moved person %d from (%d,%d) to (%d,%d)\n", 
+                           omp_get_thread_num(), i, x1, y1, new_x, new_y);
                     p->x = new_x;
                     p->y = new_y;
                 }
-
-                omp_unset_lock(&cell_locks[p->x][p->y]);
-                omp_unset_lock(&cell_locks[new_x][new_y]);
+            
+                // Release locks in reverse order
+                if (lock_current_first) {
+                    omp_unset_lock(&cell_locks[x2][y2]);
+                    omp_unset_lock(&cell_locks[x1][y1]);
+                } else {
+                    omp_unset_lock(&cell_locks[x1][y1]);
+                    omp_unset_lock(&cell_locks[x2][y2]);
+                }
             }
 
             // Infection resolution
@@ -284,7 +365,6 @@ void simulate_one_day(Person *population)
                         p->susceptibility = 0.0f;
 
                 } else {
-
                     omp_set_lock(&cell_locks[p->x][p->y]);
                     removePerson(p);
                     omp_unset_lock(&cell_locks[p->x][p->y]);
@@ -299,7 +379,6 @@ void simulate_one_day(Person *population)
             for (int j = 0; j < H; j++)
                 omp_destroy_lock(&cell_locks[i][j]);
 
-        //TODO: check this critical
         for (int i = 0; i < local_newly_count; i++) {
             Person *p = local_newly_infected[i];
             p->new_infected = false;
@@ -331,6 +410,7 @@ int main()
     for (int day = 0; day < ND; day++)
     {
         save_population(population, day);
+        printf("\n------- DAY %d DEBUG --------\n", day);
         simulate_one_day(population);
     }
 

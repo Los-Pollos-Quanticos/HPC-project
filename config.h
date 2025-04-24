@@ -8,12 +8,12 @@
 #include <time.h>
 
 // Constants for simulation parameters
-#define NP 50             // Number of persons
-#define INFP 0.05         // Initial percentage of infected persons
-#define IMM 0.02          // Initial percentage of immune persons
+#define NP 20             // Number of persons
+#define INFP 0.30         // Initial percentage of infected persons
+#define IMM 0.20          // Initial percentage of immune persons
 #define S_AVG 0.8         // Susceptibility average
-#define W 10              // Width of the grid
-#define H 10              // Height of the grid
+#define W 3               // Width of the grid
+#define H 3               // Height of the grid
 #define ND 30             // Number of days in simulation
 #define INCUBATION_DAYS 4 // Incubation period in days
 #define BETA 0.8          // Contagiousness factor
