@@ -1,8 +1,8 @@
 #ifndef UTILS_H
 #define UTILS_H
 
-#include "./config.h"
-#include "./occupancyMap.h"
+#include "../config.h"
+#include "../structures/occupancyMap.h"
 
 float gaussian_random(unsigned int seed, float mean, float stddev);
 void print_grid(Person *population);

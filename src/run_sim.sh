@@ -2,7 +2,7 @@
 
 # Step 1: Compile the C code
 echo "Compiling plague.c..."
-gcc -o ./bin/plague ./serial/plague.c ./utils.c ./tupleList.c ./occupancyMap.c -lm
+gcc -o ./bin/plague ./serial/plague.c ./utils/utils.c ./structures/tupleList.c ./structures/occupancyMap.c -lm
 
 # Step 2: Run the compiled executable
 echo "Running ./plague..."
