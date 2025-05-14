@@ -16,6 +16,7 @@ void init_population(Person *population)
     int i;
     int num_immune = (int)(NP * IMM);
     int num_infected = (int)(NP * INFP);
+    unsigned int seed = (unsigned int)(time(NULL));
 
     // --- Array with available coordinates and occupancy count ---
     occupancy_map = malloc(W * H * sizeof(Cell));
@@ -47,7 +48,7 @@ void init_population(Person *population)
     {
         Person *p = &population[i];
         Tuple t;
-        int idx = getRandomTupleIndex(available_coords, &t);
+        int idx = getRandomTupleIndex(seed, available_coords, &t);
 
         p->x = t.x;
         p->y = t.y;
@@ -66,12 +67,12 @@ void init_population(Person *population)
         }
         else if (role == 1) // Infected
         {
-            p->susceptibility = gaussian_random(S_AVG, 0.1f);
+            p->susceptibility = gaussian_random(seed, S_AVG, 0.1f);
             p->incubation_days = INCUBATION_DAYS + 1;
         }
         else // Susceptible
         {
-            p->susceptibility = gaussian_random(S_AVG, 0.1f);
+            p->susceptibility = gaussian_random(seed, S_AVG, 0.1f);
             p->incubation_days = 0;
         }
 
@@ -196,15 +197,23 @@ int main()
         return 1;
     }
     srand(time(NULL));
-
+    clock_t start, end;
+    double cpu_time_used;
+     
+    start = clock();
+     
     init_population(population);
 
-    // simulation
-    for (int day = 0; day < ND; day++)
-    {
-        save_population(population, day);
-        simulate_one_day(population);
-    }
+     // simulation
+     for (int day = 0; day < ND; day++)
+     {
+         save_population(population, day);
+         simulate_one_day(population);
+     }
+
+     end = clock();
+     cpu_time_used = ((double) (end - start)) / CLOCKS_PER_SEC; 
+     printf("Time taken: %f seconds\n", cpu_time_used);
 
     free(population);
     freeOccupancyMap();
