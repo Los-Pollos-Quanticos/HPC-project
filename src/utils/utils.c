@@ -44,7 +44,7 @@ bool is_newly_infected(const Person *p)
 void save_population(Person *population, int day)
 {
     char filename[32];
-    sprintf(filename, "../report/day_%03d.dat", day);
+    snprintf(filename, sizeof(filename), "./report/day_%03d.dat", day);
 
     FILE *f = fopen(filename, "wb");
     if (!f)

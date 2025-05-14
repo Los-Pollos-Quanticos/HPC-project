@@ -12,18 +12,18 @@ typedef struct
 
 typedef struct
 {
-    Tuple *data;  // Array of tuples
-    int size;     // Current number of valid tuples
-    int capacity; // Maximum capacity of the array
+    Tuple *data;   // Array of tuples
+    long size;     // Current number of valid tuples
+    long capacity; // Maximum capacity of the array
 } TList;
 
-TList *createTList(int capacity);
+TList *createTList(long capacity);
 
 void addTuple(TList *arr, int x, int y);
 
-void removeTupleAt(TList *arr, int index);
+void removeTupleAt(TList *arr, long index);
 
-int getRandomTupleIndex(unsigned int seed, TList *arr, Tuple *out);
+long getRandomTupleIndex(unsigned int seed, TList *arr, Tuple *out);
 
 void freeTList(TList *list);
 #endif

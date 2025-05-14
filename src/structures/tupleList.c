@@ -1,6 +1,6 @@
 #include "tupleList.h"
 
-TList *createTList(int capacity)
+TList *createTList(long capacity)
 {
     TList *arr = malloc(sizeof(TList));
     arr->data = malloc(sizeof(Tuple) * capacity);
@@ -19,7 +19,7 @@ void addTuple(TList *arr, int x, int y)
     arr->data[arr->size++] = (Tuple){x, y};
 }
 
-void removeTupleAt(TList *arr, int index)
+void removeTupleAt(TList *arr, long index)
 {
     if (index < 0 || index >= arr->size)
     {
@@ -30,12 +30,12 @@ void removeTupleAt(TList *arr, int index)
     arr->size--;
 }
 
-int getRandomTupleIndex(unsigned int seed, TList *arr, Tuple *out)
+long getRandomTupleIndex(unsigned int seed, TList *arr, Tuple *out)
 {
     if (arr->size == 0)
         return -1;
 
-    int idx = rand_r(&seed) % arr->size;
+    long idx = rand_r(&seed) % arr->size;
     *out = arr->data[idx];
     return idx;
 }

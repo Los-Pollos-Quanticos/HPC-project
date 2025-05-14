@@ -7,7 +7,10 @@ Cell *occupancy_map = NULL;
 void init_population(Person *population)
 {
     // --- Check if population fits grid (NP <= W * H * MAXP_CELL) ---
-    if (NP > W * H * MAXP_CELL)
+    long grid_size = (long)W * H;
+    long grid_capacity = (long)grid_size * MAXP_CELL;
+
+    if (NP > grid_capacity)
     {
         printf("Error: Population size exceeds available space on the grid.\n");
         exit(1); // Exits the program if the population size exceeds capacity
@@ -18,7 +21,7 @@ void init_population(Person *population)
     int num_infected = (int)(NP * INFP);
 
     // --- Array with available coordinates and occupancy count ---
-    occupancy_map = malloc(W * H * sizeof(Cell));
+    occupancy_map = malloc(grid_size * sizeof(Cell));
 
     if (occupancy_map == NULL)
     {
@@ -26,7 +29,7 @@ void init_population(Person *population)
         return;
     }
 
-    TList *available_coords = createTList(W * H);
+    TList *available_coords = createTList(grid_size);
     for (int x = 0; x < W; x++)
     {
         for (int y = 0; y < H; y++)
@@ -36,7 +39,7 @@ void init_population(Person *population)
             AT(x, y).persons = malloc(MAXP_CELL * sizeof(Person *));
             if (AT(x, y).persons == NULL)
             {
-                fprintf(stderr, "Failed to allocate persons array for cell %d\n", i);
+                fprintf(stderr, "Failed to allocate persons array for cell %d\n", x * H + y);
                 exit(1);
             }
         }
@@ -47,7 +50,8 @@ void init_population(Person *population)
     {
         Person *p = &population[i];
         Tuple t;
-        int idx = getRandomTupleIndex(available_coords, &t);
+        unsigned int seed = (unsigned int)time(NULL);
+        long idx = getRandomTupleIndex(seed, available_coords, &t);
 
         p->x = t.x;
         p->y = t.y;
@@ -66,17 +70,16 @@ void init_population(Person *population)
         }
         else if (role == 1) // Infected
         {
-            p->susceptibility = gaussian_random(S_AVG, 0.1f);
+            p->susceptibility = gaussian_random(seed, S_AVG, 0.1f);
             p->incubation_days = INCUBATION_DAYS + 1;
         }
         else // Susceptible
         {
-            p->susceptibility = gaussian_random(S_AVG, 0.1f);
+            p->susceptibility = gaussian_random(seed, S_AVG, 0.1f);
             p->incubation_days = 0;
         }
 
-        // TODO: make test about it
-        //  p->new_infected = false;
+        p->new_infected = false;
 
         if (AT(t.x, t.y).occupancy == MAXP_CELL)
         {
@@ -140,16 +143,19 @@ void simulate_one_day(Person *population)
         int new_y = p->y + dy;
 
         bool xy_valid = new_x >= 0 && new_x < W && new_y >= 0 && new_y < H;
-        bool occupancy_valid = AT(new_x, new_y).occupancy < MAXP_CELL;
 
-        if (xy_valid && occupancy_valid)
+        if (xy_valid)
         {
-            // Update occupancy map
-            movePerson(p, new_x, new_y);
+            bool occupancy_valid = AT(new_x, new_y).occupancy < MAXP_CELL;
+            if (occupancy_valid)
+            {
+                // Update occupancy map
+                movePerson(p, new_x, new_y);
 
-            // Update position
-            p->x = new_x;
-            p->y = new_y;
+                // Update position
+                p->x = new_x;
+                p->y = new_y;
+            }
         }
 
         // Check last day of incubation
@@ -188,6 +194,7 @@ void simulate_one_day(Person *population)
 
 int main()
 {
+    printf("Simulation of a plague started\n");
     Person *population = (Person *)malloc(NP * sizeof(Person));
 
     if (population == NULL)

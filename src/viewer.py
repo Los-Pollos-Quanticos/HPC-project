@@ -17,8 +17,8 @@ PERSON_STRUCT_FORMAT = "iii"  # x, y, state as ints
 INT_SIZE = struct.calcsize("i")
 PERSON_SIZE = struct.calcsize(PERSON_STRUCT_FORMAT)
 
-GRID_WIDTH = 3
-GRID_HEIGHT = 3
+GRID_WIDTH = 10000
+GRID_HEIGHT = 4500
 CELL_PADDING = 0.1  # spacing inside cell for multiple people
 
 def load_day_data(day):

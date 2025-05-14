@@ -1,3 +1,4 @@
-/src/bin
 .DS_Store
-/src/report
+**/bin
+**/report
+.vscode

@@ -1,7 +1,7 @@
 #ifndef OCCUPANCYMAP_H
 #define OCCUPANCYMAP_H
 
-#include "./config.h"
+#include "../config.h"
 
 typedef struct
 {
