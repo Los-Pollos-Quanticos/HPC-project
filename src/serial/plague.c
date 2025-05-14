@@ -7,8 +7,8 @@ Cell *occupancy_map = NULL;
 void init_population(Person *population)
 {
     // --- Check if population fits grid (NP <= W * H * MAXP_CELL) ---
-    long grid_size = (long)W * H;
-    long grid_capacity = (long)grid_size * MAXP_CELL;
+    int grid_size = (int)W * H;
+    int grid_capacity = (int)grid_size * MAXP_CELL;
 
     if (NP > grid_capacity)
     {
@@ -51,7 +51,7 @@ void init_population(Person *population)
         Person *p = &population[i];
         Tuple t;
         unsigned int seed = (unsigned int)time(NULL);
-        long idx = getRandomTupleIndex(seed, available_coords, &t);
+        int idx = getRandomTupleIndex(seed, available_coords, &t);
 
         p->x = t.x;
         p->y = t.y;
