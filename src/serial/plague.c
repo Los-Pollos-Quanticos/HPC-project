@@ -2,6 +2,8 @@
 #include "../structures/tupleList.h"
 #include "../structures/occupancyMap.h"
 
+#include <time.h>
+
 Cell *occupancy_map = NULL;
 
 void init_population(Person *population)
@@ -194,7 +196,7 @@ void simulate_one_day(Person *population)
 
 int main()
 {
-    printf("Simulation of a plague started\n");
+    //printf("Simulation of a plague started\n");
     Person *population = (Person *)malloc(NP * sizeof(Person));
 
     if (population == NULL)
@@ -204,15 +206,24 @@ int main()
     }
     srand(time(NULL));
 
+    
+    clock_t start_time = clock();
     init_population(population);
+    clock_t init_pop_time = clock();
 
     // simulation
     for (int day = 0; day < ND; day++)
     {
+        printf("------- DAY %d DEBUG --------\n", day);
         save_population(population, day);
         simulate_one_day(population);
     }
 
+    clock_t end_time = clock();
+    double elapsed_time = (double)(end_time - start_time) / CLOCKS_PER_SEC;
+    double init_pop_time_elapsed = (double)(init_pop_time - start_time) / CLOCKS_PER_SEC;
+    printf("Simulation completed in %.2f seconds\n", elapsed_time);
+    printf("Population initialized in %.2f seconds\n", init_pop_time_elapsed);
     free(population);
     freeOccupancyMap();
     occupancy_map = NULL;

@@ -4,6 +4,8 @@
 #include "../structures/tupleList.h"
 #include "../structures/occupancyMap.h"
 
+#define LOCK(x, y) cell_locks[x * H + y]
+
 #define NTHREADS 4
 
 Cell *occupancy_map = NULL;
@@ -69,7 +71,7 @@ void init_population(Person *population)
     int assigned_immune = 0;
     int assigned_infected = 0;
 
-    for (int i = 0; i < NTHREADS; ++i)
+    for (int i = 0; i < NTHREADS; i++)
     {
         // Distribute people
         int max_people = MAXP_CELL * cells_per_thread[i];
@@ -244,175 +246,6 @@ void init_population(Person *population)
     free(infected_per_thread);
 }
 
-// void simulate_one_day(Person *population)
-// {
-//     int max_num_new_infected = NP - (int)(NP * IMM);
-//     // printf("Max number of infected: %d\n", max_num_new_infected);
-
-//     omp_lock_t cell_locks[W][H];
-//     #pragma omp parallel for collapse(2)
-//     for (int i = 0; i < W; i++)
-//         for (int j = 0; j < H; j++)
-//             omp_init_lock(&cell_locks[i][j]);
-
-
-//     #pragma omp parallel
-//     {
-//         unsigned int seed = (unsigned int)(time(NULL) ^ omp_get_thread_num());
-//         Person **local_newly_infected = malloc(sizeof(Person *) * max_num_new_infected);
-//         int local_newly_count = 0;
-
-//         #pragma omp for schedule(guided)
-//         for (int i = 0; i < NP; i++)
-//         {
-//             Person *p = &population[i];
-
-//             // DEBUG
-//             // printf("Thread %d taking person %d with incubation days %d in (%d,%d)\n", omp_get_thread_num(), i, p->incubation_days, p->x, p->y);
-
-//             if (is_dead(p))
-//                 continue;
-
-//             if (is_infected(p))
-//             {
-//                 p->incubation_days--;
-
-//                 for (int dx = -IRD; dx <= IRD; dx++)
-//                 {
-//                     for (int dy = -IRD; dy <= IRD; dy++)
-//                     {
-//                         int nx = p->x + dx;
-//                         int ny = p->y + dy;
-
-//                         if (nx < 0 || nx >= W || ny < 0 || ny >= H)
-//                             continue;
-
-//                         omp_set_lock(&cell_locks[nx][ny]);
-
-//                         for (int j = 0; j < AT(nx, ny).occupancy; j++)
-//                         {
-//                             Person *neighbor = AT(nx, ny).persons[j];
-//                             if (!is_infected(neighbor) && !is_immune(neighbor) && !neighbor->new_infected)
-//                             {
-//                                 float infectivity = BETA * neighbor->susceptibility;
-//                                 if (infectivity > ITH)
-//                                 {
-//                                     neighbor->new_infected = true;
-//                                     // printf("Person %d infected person %d in (%d,%d)\n", i, j, nx, ny);
-//                                     local_newly_infected[local_newly_count++] = neighbor;
-//                                 }
-//                             }
-//                         }
-
-//                         omp_unset_lock(&cell_locks[nx][ny]);
-//                     }
-//                 }
-//             }
-
-//             int dx = (rand_r(&seed) % 3) - 1;
-//             int dy = (rand_r(&seed) % 3) - 1;
-//             int new_x = p->x + dx;
-//             int new_y = p->y + dy;
-
-//             bool xy_valid = new_x >= 0 && new_x < W && new_y >= 0 && new_y < H &&
-//                             (new_x != p->x || new_y != p->y);
-
-//             // if (xy_valid) {
-//             //     omp_set_lock(&cell_locks[new_x][new_y]);
-//             //     bool occupancy_valid = AT(new_x, new_y).occupancy < MAXP_CELL;
-
-//             //     if (occupancy_valid) {
-//             //         omp_set_lock(&cell_locks[p->x][p->y]);
-//             //         movePerson(p, new_x, new_y);
-//             //         omp_unset_lock(&cell_locks[p->x][p->y]);
-//             //         printf("Thread %d moved person %d from (%d,%d) to (%d,%d)\n", omp_get_thread_num(), i, p->x, p->y, new_x, new_y);
-//             //         p->x = new_x;
-//             //         p->y = new_y;
-//             //     }
-
-//             //     omp_unset_lock(&cell_locks[new_x][new_y]);
-//             // }
-
-//             if (xy_valid)
-//             {
-//                 int x1 = p->x, y1 = p->y;
-//                 int x2 = new_x, y2 = new_y;
-
-//                 bool lock_current_first = (x1 < x2) || (x1 == x2 && y1 < y2);
-
-//                 if (lock_current_first)
-//                 {
-//                     omp_set_lock(&cell_locks[x1][y1]);
-//                     omp_set_lock(&cell_locks[x2][y2]);
-//                 }
-//                 else
-//                 {
-//                     omp_set_lock(&cell_locks[x2][y2]);
-//                     omp_set_lock(&cell_locks[x1][y1]);
-//                 }
-
-//                 bool occupancy_valid = AT(new_x, new_y).occupancy < MAXP_CELL;
-
-//                 if (occupancy_valid)
-//                 {
-//                     movePerson(p, new_x, new_y);
-//                     // printf("Thread %d moved person %d from (%d,%d) to (%d,%d)\n",
-//                     //        omp_get_thread_num(), i, x1, y1, new_x, new_y);
-//                     p->x = new_x;
-//                     p->y = new_y;
-//                 }
-
-//                 // Release locks in reverse order
-//                 if (lock_current_first)
-//                 {
-//                     omp_unset_lock(&cell_locks[x2][y2]);
-//                     omp_unset_lock(&cell_locks[x1][y1]);
-//                 }
-//                 else
-//                 {
-//                     omp_unset_lock(&cell_locks[x1][y1]);
-//                     omp_unset_lock(&cell_locks[x2][y2]);
-//                 }
-//             }
-
-//             // Infection resolution
-//             if (p->incubation_days == 1)
-//             {
-//                 float prob = (float)rand_r(&seed) / RAND_MAX;
-
-//                 if (prob < MU)
-//                 {
-//                     p->incubation_days = 0;
-
-//                     if (rand_r(&seed) % 2 == 0)
-//                         p->susceptibility = 0.0f;
-//                 }
-//                 else
-//                 {
-//                     omp_set_lock(&cell_locks[p->x][p->y]);
-//                     removePerson(p);
-//                     omp_unset_lock(&cell_locks[p->x][p->y]);
-//                     p->x = -1;
-//                     p->y = -1;
-//                 }
-//             }
-//         }
-
-//         #pragma omp for collapse(2)
-//         for (int i = 0; i < W; i++)
-//             for (int j = 0; j < H; j++)
-//                 omp_destroy_lock(&cell_locks[i][j]);
-
-//         for (int i = 0; i < local_newly_count; i++)
-//         {
-//             Person *p = local_newly_infected[i];
-//             p->new_infected = false;
-//             p->incubation_days = INCUBATION_DAYS + 1;
-//         }
-
-//         free(local_newly_infected);
-//     }
-// }
 
 void simulate_one_day(Person *population)
 {
@@ -428,7 +261,7 @@ void simulate_one_day(Person *population)
     #pragma omp parallel for collapse(2)
     for (int i = 0; i < W; i++)
         for (int j = 0; j < H; j++)
-            omp_init_lock(&cell_locks[i * H + j]);
+            omp_init_lock(&LOCK(i,j));
 
     #pragma omp parallel
     {
@@ -458,7 +291,7 @@ void simulate_one_day(Person *population)
                         if (nx < 0 || nx >= W || ny < 0 || ny >= H)
                             continue;
 
-                        omp_set_lock(&cell_locks[nx * H + ny]);
+                        omp_set_lock(&LOCK(nx, ny));
 
                         for (int j = 0; j < AT(nx, ny).occupancy; j++)
                         {
@@ -474,7 +307,7 @@ void simulate_one_day(Person *population)
                             }
                         }
 
-                        omp_unset_lock(&cell_locks[nx * H + ny]);
+                        omp_unset_lock(&LOCK(nx, ny));
                     }
                 }
             }
@@ -496,13 +329,13 @@ void simulate_one_day(Person *population)
 
                 if (lock_current_first)
                 {
-                    omp_set_lock(&cell_locks[x1 * H + y1]);
-                    omp_set_lock(&cell_locks[x2 * H + y2]);
+                    omp_set_lock(&LOCK(x1, y1));
+                    omp_set_lock(&LOCK(x2, y2));
                 }
                 else
                 {
-                    omp_set_lock(&cell_locks[x2 * H + y2]);
-                    omp_set_lock(&cell_locks[x1 * H + y1]);
+                    omp_set_lock(&LOCK(x2, y2));
+                    omp_set_lock(&LOCK(x1, y1));
                 }
 
                 bool occupancy_valid = AT(new_x, new_y).occupancy < MAXP_CELL;
@@ -516,13 +349,13 @@ void simulate_one_day(Person *population)
 
                 if (lock_current_first)
                 {
-                    omp_unset_lock(&cell_locks[x2 * H + y2]);
-                    omp_unset_lock(&cell_locks[x1 * H + y1]);
+                    omp_unset_lock(&LOCK(x2, y2));
+                    omp_unset_lock(&LOCK(x1, y1));
                 }
                 else
                 {
-                    omp_unset_lock(&cell_locks[x1 * H + y1]);
-                    omp_unset_lock(&cell_locks[x2 * H + y2]);
+                    omp_unset_lock(&LOCK(x1, y1));
+                    omp_unset_lock(&LOCK(x2, y2));
                 }
             }
 
@@ -539,9 +372,9 @@ void simulate_one_day(Person *population)
                 }
                 else
                 {
-                    omp_set_lock(&cell_locks[p->x * H + p->y]);
+                    omp_set_lock(&LOCK(p->x, p->y));
                     removePerson(p);
-                    omp_unset_lock(&cell_locks[p->x * H + p->y]);
+                    omp_unset_lock(&LOCK(p->x, p->y));
                     p->x = -1;
                     p->y = -1;
                 }
@@ -551,7 +384,7 @@ void simulate_one_day(Person *population)
         #pragma omp for collapse(2)
         for (int i = 0; i < W; i++)
             for (int j = 0; j < H; j++)
-                omp_destroy_lock(&cell_locks[i * H + j]);
+                omp_destroy_lock(&LOCK(i,j));
 
         for (int i = 0; i < local_newly_count; i++)
         {
@@ -580,15 +413,21 @@ int main()
     }
     srand(time(NULL));
 
+    double start_time = omp_get_wtime();
     init_population(population);
+    double init_pop_end_time = omp_get_wtime();
 
     // simulation
     for (int day = 0; day < ND; day++)
     {
         save_population(population, day);
-        printf("\n------- DAY %d DEBUG --------\n", day);
+        printf("------- DAY %d DEBUG --------\n", day);
         simulate_one_day(population);
     }
+
+    double end_time = omp_get_wtime();
+    printf("Simulation completed in %f seconds\n", end_time - start_time);
+    printf("Population initialized in %f seconds\n", init_pop_end_time - start_time);
 
     free(population);
     freeOccupancyMap();

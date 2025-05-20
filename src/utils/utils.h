@@ -4,6 +4,8 @@
 #include "../config.h"
 #include "../structures/occupancyMap.h"
 
+#define LOCK(x, y) cell_locks[x * H + y]
+
 float gaussian_random(unsigned int seed, float mean, float stddev);
 void print_grid(Person *population);
 
