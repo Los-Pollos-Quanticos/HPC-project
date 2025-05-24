@@ -8,6 +8,8 @@ Cell *occupancy_map = NULL;
 
 void init_population(Person *population)
 {
+
+    clock_t start_occupancy_map_time = clock();
     // --- Check if population fits grid (NP <= W * H * MAXP_CELL) ---
     int grid_size = (int)W * H;
     int grid_capacity = (int)grid_size * MAXP_CELL;
@@ -31,6 +33,7 @@ void init_population(Person *population)
         return;
     }
 
+
     TList *available_coords = createTList(grid_size);
     for (int x = 0; x < W; x++)
     {
@@ -47,6 +50,12 @@ void init_population(Person *population)
         }
     }
 
+    clock_t end_occupancy_map_time = clock();
+    double occupancy_map_time = (double)(end_occupancy_map_time - start_occupancy_map_time) / CLOCKS_PER_SEC;
+    //printf("Time taken to initialize occupancy map: %f seconds\n", occupancy_map_time);
+
+
+    clock_t start_population_time = clock();
     // --- Initialize persons ---
     for (i = 0; i < NP; i++)
     {
@@ -90,10 +99,14 @@ void init_population(Person *population)
     }
 
     freeTList(available_coords);
+    clock_t end_population_time = clock();
+    double population_time = (double)(end_population_time - start_population_time) / CLOCKS_PER_SEC;
+    //printf("Time taken to distribute population: %f seconds\n", population_time);
 }
 
 void simulate_one_day(Person *population)
 {
+    clock_t start_simulation_time = clock();
     int max_num_new_infected = NP - (int)(NP * IMM);
     Person **newly_infected = malloc(sizeof(Person *) * max_num_new_infected);
     int newly_count = 0;
@@ -192,6 +205,9 @@ void simulate_one_day(Person *population)
         p->incubation_days = INCUBATION_DAYS + 1;
     }
     free(newly_infected);
+    clock_t end_simulation_time = clock();
+    double simulation_time = (double)(end_simulation_time - start_simulation_time) / CLOCKS_PER_SEC;
+    //printf("Time taken to simulate day: %f seconds\n", simulation_time);
 }
 
 int main()
@@ -211,6 +227,7 @@ int main()
     init_population(population);
     clock_t init_pop_time = clock();
 
+    clock_t simulate_day_time = clock();
     // simulation
     for (int day = 0; day < ND; day++)
     {
@@ -220,10 +237,14 @@ int main()
     }
 
     clock_t end_time = clock();
+
+    
     double elapsed_time = (double)(end_time - start_time) / CLOCKS_PER_SEC;
+    double simulate_day_time_elapsed = (double)(end_time - simulate_day_time) / CLOCKS_PER_SEC;
     double init_pop_time_elapsed = (double)(init_pop_time - start_time) / CLOCKS_PER_SEC;
-    printf("Simulation completed in %.2f seconds\n", elapsed_time);
-    printf("Population initialized in %.2f seconds\n", init_pop_time_elapsed);
+    printf("Simulation completed in %f seconds\n", elapsed_time);
+    printf("Days simulated in %f seconds\n", simulate_day_time_elapsed);
+    printf("Population initialized in %f seconds\n", init_pop_time_elapsed);
     free(population);
     freeOccupancyMap();
     occupancy_map = NULL;

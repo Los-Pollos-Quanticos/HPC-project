@@ -10,6 +10,8 @@ typedef struct
 } Cell;
 
 extern Cell *occupancy_map;
+extern Person **all_persons_pointers;
+
 // Macro to access occupancy_map
 #define AT(x, y) occupancy_map[(x) * H + (y)]
 
