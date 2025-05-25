@@ -6,14 +6,16 @@
 
 Cell *occupancy_map = NULL;
 
-Person **all_persons_pointers = NULL;
+long get_time_in_ms(struct timespec start, struct timespec end)
+{
+    return (end.tv_sec - start.tv_sec) * 1000 + (end.tv_nsec - start.tv_nsec) / 1000000;
+}
 
 void init_population(Person *population)
 {
 
     clock_t start_occupancy_map_time = clock();
-    // --- Check if population fits grid (NP <= W * H * MAXP_CELL) ---
-    int grid_size = W * H;
+    int grid_size = (int)W * H;
     int grid_capacity = (int)grid_size * MAXP_CELL;
 
     if (NP > grid_capacity)
@@ -35,15 +37,8 @@ void init_population(Person *population)
         return;
     }
 
-    all_persons_pointers = (Person**)malloc((long)W * H * MAXP_CELL * sizeof(Person *));
-    if (all_persons_pointers == NULL)
-    {
-        fprintf(stderr, "Failed to allocate global persons pointers array.\n");
-        exit(1);
-    }
-    
     TList *available_coords = createTList(grid_size);
-    //PREVIOUS OCCUPANCY MAP INITIALIZATION VERSION-------------------------------------------
+    // PREVIOUS OCCUPANCY MAP INITIALIZATION VERSION-------------------------------------------
 
     // for (int x = 0; x < W; x++)
     // {
@@ -68,22 +63,22 @@ void init_population(Person *population)
         {
             addTuple(available_coords, x, y);
             AT(x, y).occupancy = 0;
-            //This line sets the person pointer of the (x,y) cell to point to the correct all_person_pointers "index"
+            // This line sets the person pointer of the (x,y) cell to point to the correct all_person_pointers "index"
             AT(x, y).persons = &all_persons_pointers[((long)x * H + y) * MAXP_CELL];
-            //We fill MAXP_CELL slots of the persons array with NULL pointers (so of the array of all_persons) 
-            for (int k = 0; k < MAXP_CELL; k++) {
-                AT(x,y).persons[k] = NULL;
+            // We fill MAXP_CELL slots of the persons array with NULL pointers (so of the array of all_persons)
+            for (int k = 0; k < MAXP_CELL; k++)
+            {
+                AT(x, y).persons[k] = NULL;
             }
         }
     }
 
     clock_t end_occupancy_map_time = clock();
     double occupancy_map_time = (double)(end_occupancy_map_time - start_occupancy_map_time) / CLOCKS_PER_SEC;
-    //printf("Time taken to initialize occupancy map: %f seconds\n", occupancy_map_time);
-
+    // printf("Time taken to initialize occupancy map: %f seconds\n", occupancy_map_time);
 
     clock_t start_population_time = clock();
-    
+
     // --- Initialize persons ---
     for (i = 0; i < NP; i++)
     {
@@ -129,7 +124,7 @@ void init_population(Person *population)
     freeTList(available_coords);
     clock_t end_population_time = clock();
     double population_time = (double)(end_population_time - start_population_time) / CLOCKS_PER_SEC;
-    //printf("Time taken to distribute population: %f seconds\n", population_time);
+    // printf("Time taken to distribute population: %f seconds\n", population_time);
 }
 
 void simulate_one_day(Person *population)
@@ -235,12 +230,15 @@ void simulate_one_day(Person *population)
     free(newly_infected);
     clock_t end_simulation_time = clock();
     double simulation_time = (double)(end_simulation_time - start_simulation_time) / CLOCKS_PER_SEC;
-    //printf("Time taken to simulate day: %f seconds\n", simulation_time);
+    // printf("Time taken to simulate day: %f seconds\n", simulation_time);
 }
 
 int main()
 {
-    //printf("Simulation of a plague started\n");
+    printf("Simulation started\n");
+    struct timespec start, end;
+    clock_gettime(CLOCK_MONOTONIC, &start);
+
     Person *population = (Person *)malloc(NP * sizeof(Person));
 
     if (population == NULL)
@@ -250,32 +248,18 @@ int main()
     }
     srand(time(NULL));
 
-    
-    clock_t start_time = clock();
     init_population(population);
-    clock_t init_pop_time = clock();
 
-    clock_t simulate_day_time = clock();
     // simulation
     for (int day = 0; day < ND; day++)
     {
-        printf("------- DAY %d DEBUG --------\n", day);
-        save_population(population, day);
         simulate_one_day(population);
     }
 
-    clock_t end_time = clock();
-
-    
-    double elapsed_time = (double)(end_time - start_time) / CLOCKS_PER_SEC;
-    double simulate_day_time_elapsed = (double)(end_time - simulate_day_time) / CLOCKS_PER_SEC;
-    double init_pop_time_elapsed = (double)(init_pop_time - start_time) / CLOCKS_PER_SEC;
-    printf("Simulation completed in %f seconds\n", elapsed_time);
-    printf("Days simulated in %f seconds\n", simulate_day_time_elapsed);
-    printf("Population initialized in %f seconds\n", init_pop_time_elapsed);
     free(population);
     freeOccupancyMap();
     occupancy_map = NULL;
-    free(all_persons_pointers);
-    all_persons_pointers = NULL;
+
+    clock_gettime(CLOCK_MONOTONIC, &end);
+    printf("Time: %ld ms\n", get_time_in_ms(start, end));
 }
