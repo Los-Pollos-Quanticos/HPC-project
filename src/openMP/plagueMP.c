@@ -54,7 +54,7 @@ void init_population(Person *population)
             //This line sets the person pointer of the (x,y) cell to point to the correct all_person_pointers "index"
             AT(x, y).persons = &all_persons_pointers[((long)x * H + y) * MAXP_CELL];
             //We fill MAXP_CELL slots of the persons array with NULL pointers (so of the array of all_persons) 
-            for (int k = 0; k < MAXP_CELL; ++k) {
+            for (int k = 0; k < MAXP_CELL; k++) {
                 AT(x,y).persons[k] = NULL;
             }
         }

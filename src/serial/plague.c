@@ -6,12 +6,14 @@
 
 Cell *occupancy_map = NULL;
 
+Person **all_persons_pointers = NULL;
+
 void init_population(Person *population)
 {
 
     clock_t start_occupancy_map_time = clock();
     // --- Check if population fits grid (NP <= W * H * MAXP_CELL) ---
-    int grid_size = (int)W * H;
+    int grid_size = W * H;
     int grid_capacity = (int)grid_size * MAXP_CELL;
 
     if (NP > grid_capacity)
@@ -33,19 +35,44 @@ void init_population(Person *population)
         return;
     }
 
-
+    all_persons_pointers = (Person**)malloc((long)W * H * MAXP_CELL * sizeof(Person *));
+    if (all_persons_pointers == NULL)
+    {
+        fprintf(stderr, "Failed to allocate global persons pointers array.\n");
+        exit(1);
+    }
+    
     TList *available_coords = createTList(grid_size);
+    //PREVIOUS OCCUPANCY MAP INITIALIZATION VERSION-------------------------------------------
+
+    // for (int x = 0; x < W; x++)
+    // {
+    //     for (int y = 0; y < H; y++)
+    //     {
+    //         addTuple(available_coords, x, y);
+    //         AT(x, y).occupancy = 0;
+    //         AT(x, y).persons = malloc(MAXP_CELL * sizeof(Person *));
+    //         if (AT(x, y).persons == NULL)
+    //         {
+    //             fprintf(stderr, "Failed to allocate persons array for cell %d\n", x * H + y);
+    //             exit(1);
+    //         }
+    //     }
+    // }
+
+    //----------------------------------------------------------------------------------
+
     for (int x = 0; x < W; x++)
     {
         for (int y = 0; y < H; y++)
         {
             addTuple(available_coords, x, y);
             AT(x, y).occupancy = 0;
-            AT(x, y).persons = malloc(MAXP_CELL * sizeof(Person *));
-            if (AT(x, y).persons == NULL)
-            {
-                fprintf(stderr, "Failed to allocate persons array for cell %d\n", x * H + y);
-                exit(1);
+            //This line sets the person pointer of the (x,y) cell to point to the correct all_person_pointers "index"
+            AT(x, y).persons = &all_persons_pointers[((long)x * H + y) * MAXP_CELL];
+            //We fill MAXP_CELL slots of the persons array with NULL pointers (so of the array of all_persons) 
+            for (int k = 0; k < MAXP_CELL; k++) {
+                AT(x,y).persons[k] = NULL;
             }
         }
     }
@@ -56,6 +83,7 @@ void init_population(Person *population)
 
 
     clock_t start_population_time = clock();
+    
     // --- Initialize persons ---
     for (i = 0; i < NP; i++)
     {
@@ -248,4 +276,6 @@ int main()
     free(population);
     freeOccupancyMap();
     occupancy_map = NULL;
+    free(all_persons_pointers);
+    all_persons_pointers = NULL;
 }
