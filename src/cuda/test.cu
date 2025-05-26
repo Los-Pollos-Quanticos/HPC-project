@@ -27,20 +27,97 @@
 #include <thrust/partition.h>
 #include <thrust/binary_search.h>
 
-#define W 10000                           // Width of the grid
-#define H 10000                           // Height of the grid
-#define MAXP_CELL 3                       // Maximum number of people in a cell
-#define NP ((int)(1 * W * H * MAXP_CELL)) // Number of people
-// #define NP 7
+#define W 10000     // Width of the grid
+#define H 10000     // Height of the grid
+#define MAXP_CELL 3 // Maximum number of people in a cell
+#define NP 10000000
 #define INFP 0.5f         // Initial percentage of infected persons
 #define IMM 0.1f          // Initial percentage of immune persons
 #define S_AVG 0.5f        // Susceptibility average
-#define ND 3              // Number of days in simulation
-#define INCUBATION_DAYS 1 // Incubation period in days
+#define ND 20             // Number of days in simulation
+#define INCUBATION_DAYS 4 // Incubation period in days
 #define BETA 0.8f         // Contagiousness factor
 #define ITH 0.2f          // Infection threshold
 #define IRD 1             // Infection radius (in cells)
 #define MU 0.6f           // Probability of recovery after infection
+
+void debugState(const char *phase,
+                int *d_x, int *d_y,
+                int *d_cellIdx,
+                int *d_incub, float *d_susc,
+                int *d_cellCount, int *d_cellStart)
+{
+    const int P_SAMPLE = NP; // show all persons
+    const int G_PATCH = W;   // full grid width in this tiny example
+
+    printf("===== DEBUG: %s =====\n", phase);
+
+    // 1) copy down all person data
+    int h_x[P_SAMPLE], h_y[P_SAMPLE], h_cellIdx[P_SAMPLE], h_incub[P_SAMPLE];
+    float h_susc[P_SAMPLE];
+    cudaMemcpy(h_x, d_x, sizeof(int) * P_SAMPLE, cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_y, d_y, sizeof(int) * P_SAMPLE, cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_cellIdx, d_cellIdx, sizeof(int) * P_SAMPLE, cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_incub, d_incub, sizeof(int) * P_SAMPLE, cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_susc, d_susc, sizeof(float) * P_SAMPLE, cudaMemcpyDeviceToHost);
+
+    // 2) pretty‐print a table of each person
+    printf(" Persons:\n");
+    printf("  ID | CellIdx |   (x,y)   | IncubDays | Susc\n");
+    printf(" ----+---------+-----------+-----------+------\n");
+    for (int i = 0; i < P_SAMPLE; ++i)
+    {
+        printf(" %3d | %7d | (%2d,%2d) |     %2d    | %.2f\n",
+               i,
+               h_cellIdx[i],
+               h_x[i],
+               h_y[i],
+               h_incub[i],
+               h_susc[i]);
+    }
+
+    // 3) dump grid cell counts (top‐left G_PATCH×G_PATCH)
+    int h_grid[G_PATCH * G_PATCH];
+    cudaMemcpy(h_grid, d_cellCount,
+               sizeof(int) * G_PATCH * G_PATCH,
+               cudaMemcpyDeviceToHost);
+    printf("\n Grid cellCount [0..%d)x[0..%d):\n", G_PATCH, G_PATCH);
+    for (int y = 0; y < G_PATCH; ++y)
+    {
+        printf("  ");
+        for (int x = 0; x < G_PATCH; ++x)
+        {
+            printf("%2d ", h_grid[x + y * G_PATCH]);
+        }
+        printf("\n");
+    }
+
+    // 4) overall status summary
+    int dead = 0, infected = 0, immune = 0, susceptible = 0;
+    for (int i = 0; i < P_SAMPLE; ++i)
+    {
+        if (h_x[i] < 0)
+        {
+            dead++;
+        }
+        else if (h_incub[i] > 0)
+        {
+            infected++;
+        }
+        else if (h_susc[i] == 0.0f)
+        {
+            immune++;
+        }
+        else
+        {
+            susceptible++;
+        }
+    }
+    printf("\n Summary: dead=%d, infected=%d, immune=%d, susceptible=%d\n",
+           dead, infected, immune, susceptible);
+
+    printf("============================\n\n");
+}
 
 typedef struct
 {
@@ -234,13 +311,17 @@ void rebuildCellMap(
     int *d_incub,
     int *d_newInf,
     int *d_cellStart,
-    int *d_cellCount)
+    int *d_cellCount,
+    int *tmpKeys,
+    int *tmpCounts)
 {
-    const int maxCells = W * H;
+    using thrust::constant_iterator;
+    using thrust::device;
     using thrust::device_ptr;
     using thrust::make_tuple;
     using thrust::make_zip_iterator;
 
+    // 1) pack values into a zip‐iterator
     auto zip_begin = make_zip_iterator(
         make_tuple(
             device_ptr<int>(d_cellIdx),
@@ -251,65 +332,45 @@ void rebuildCellMap(
             device_ptr<int>(d_newInf)));
     auto zip_end = zip_begin + NP;
 
-    auto live_end = thrust::stable_partition(
-        zip_begin, zip_end,
-        IsLive());
+    // 2) partition out the “dead” cells
+    auto live_end = thrust::stable_partition(device, zip_begin, zip_end, IsLive());
     int live_count = live_end - zip_begin;
 
-    auto keys_begin = device_ptr<int>(d_cellIdx);
-    auto keys_live_end = keys_begin + live_count;
-    auto vals_begin = make_zip_iterator(
-        make_tuple(
-            thrust::device_pointer_cast(d_x),
-            thrust::device_pointer_cast(d_y),
-            thrust::device_pointer_cast(d_susc),
-            thrust::device_pointer_cast(d_incub),
-            thrust::device_pointer_cast(d_newInf)));
-
+    // 3) sort live cells by their cellIdx (keys are in-place in d_cellIdx[]; values are zipped)
     thrust::sort_by_key(
-        keys_begin, keys_live_end,
-        vals_begin);
+        device,
+        d_cellIdx,
+        d_cellIdx + live_count,
+        make_zip_iterator(make_tuple(d_x, d_y, d_susc, d_incub, d_newInf)));
 
-    thrust::constant_iterator<int> ones(1);
-    thrust::device_vector<int> d_uniqueKeys(maxCells), d_counts(maxCells);
+    // 4) run‐length encode (i.e. unique keys + counts)
+    //    → writes unique keys into tmpKeys[0..numUnique)
+    //    → writes counts    into tmpCounts[0..numUnique)
+    int *endKeyPtr;
+    int *endCountPtr;
+    thrust::tie(endKeyPtr, endCountPtr) = thrust::reduce_by_key(
+        device,
+        d_cellIdx, d_cellIdx + live_count,
+        constant_iterator<int>(1),
+        tmpKeys,
+        tmpCounts);
+    int numUnique = endKeyPtr - tmpKeys;
 
-    auto reduce_end = thrust::reduce_by_key(
-        keys_begin, keys_live_end,
-        ones,
-        d_uniqueKeys.begin(),
-        d_counts.begin());
-
-    int unique_cells = reduce_end.first - d_uniqueKeys.begin();
-    thrust::device_vector<int> d_offsets(unique_cells);
-
+    // 5) exclusive‐scan counts → directly into d_cellStart[key]
     thrust::exclusive_scan(
-        d_counts.begin(),
-        d_counts.begin() + unique_cells,
-        d_offsets.begin(),
+        device,
+        tmpCounts, tmpCounts + numUnique,
+        thrust::make_permutation_iterator(
+            device_ptr<int>(d_cellStart),
+            device_ptr<int>(tmpKeys)),
         0);
 
-    thrust::device_vector<int> d_cellStart_vec(maxCells, -1);
-    thrust::device_vector<int> d_cellCount_vec(maxCells, 0);
-
+    // 6) scatter counts → directly into d_cellCount[key]
     thrust::scatter(
-        d_offsets.begin(),
-        d_offsets.begin() + unique_cells,
-        d_uniqueKeys.begin(),
-        d_cellStart_vec.begin());
-
-    thrust::scatter(
-        d_counts.begin(),
-        d_counts.begin() + unique_cells,
-        d_uniqueKeys.begin(),
-        d_cellCount_vec.begin());
-
-    thrust::copy(
-        d_cellStart_vec.begin(), d_cellStart_vec.end(),
-        device_ptr<int>(d_cellStart));
-
-    thrust::copy(
-        d_cellCount_vec.begin(), d_cellCount_vec.end(),
-        device_ptr<int>(d_cellCount));
+        device,
+        tmpCounts, tmpCounts + numUnique,
+        tmpKeys,
+        d_cellCount);
 }
 
 __device__ bool isImmune(int i, float *d_susc)
@@ -471,8 +532,13 @@ __global__ void move_kernel(
     d_cellIdx[tid] = newCell;
 }
 
-int main()
+int main(int argc, char **argv)
 {
+    bool debugEnabled = false;
+    for (int i = 1; i < argc; ++i)
+        if (strcmp(argv[i], "--debug") == 0)
+            debugEnabled = true;
+
     printf("Simulation started\n");
     struct timespec start, end;
     clock_gettime(CLOCK_MONOTONIC, &start);
@@ -500,6 +566,11 @@ int main()
     cudaMalloc(&d_cellStart, W * H * sizeof(int));
     cudaMalloc(&d_cellCount, W * H * sizeof(int));
 
+    int *tmpKeys;
+    int *tmpCounts;
+    cudaMalloc(&tmpKeys, NP * sizeof(int));
+    cudaMalloc(&tmpCounts, NP * sizeof(int));
+
     int threads = 256;
     int blocks = (NP + threads - 1) / threads;
 
@@ -517,17 +588,33 @@ int main()
 
     log_memory_usage("After population init");
 
-    rebuildCellMap(d_cellIdx, d_x, d_y, d_susc, d_incub, d_newInf, d_cellStart, d_cellCount);
+    rebuildCellMap(d_cellIdx, d_x, d_y, d_susc, d_incub, d_newInf, d_cellStart, d_cellCount, tmpKeys, tmpCounts);
 
     log_memory_usage("After rebuildCellMap");
+
+    if (debugEnabled)
+    {
+        debugState("after rebuildCellMap",
+                   d_x, d_y, d_cellIdx, d_incub, d_susc, d_cellCount,
+                   d_cellStart);
+    }
 
     for (int day = 0; day < ND; ++day)
     {
         infect_kernel<<<blocks, threads>>>(d_x, d_y, d_incub, d_susc, d_newInf, d_cellStart, d_cellCount);
         status_kernel<<<blocks, threads>>>(d_x, d_y, d_incub, d_susc, d_newInf, d_cellIdx, d_cellCount, d_curandStates);
         move_kernel<<<blocks, threads>>>(d_x, d_y, d_cellIdx, d_cellCount, d_curandStates);
-        rebuildCellMap(d_cellIdx, d_x, d_y, d_susc, d_incub, d_newInf, d_cellStart, d_cellCount);
+        rebuildCellMap(d_cellIdx, d_x, d_y, d_susc, d_incub, d_newInf, d_cellStart, d_cellCount, tmpKeys, tmpCounts);
         log_memory_usage("After day");
+
+        if (debugEnabled)
+        {
+            char label[32];
+            snprintf(label, sizeof(label), "after day %d", day);
+            debugState(label,
+                       d_x, d_y, d_cellIdx, d_incub, d_susc, d_cellCount,
+                       d_cellStart);
+        }
 
         cudaDeviceSynchronize();
     }
