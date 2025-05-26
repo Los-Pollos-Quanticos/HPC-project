@@ -24,20 +24,100 @@
 #include <thrust/tuple.h>
 #include <thrust/scatter.h>
 #include <thrust/copy.h>
+#include <thrust/partition.h>
+#include <thrust/binary_search.h>
 
-#define W 4                                 // Width of the grid
-#define H 4                                 // Height of the grid
-#define MAXP_CELL 3                         // Maximum number of people in a cell
-#define NP ((int)(0.4 * W * H * MAXP_CELL)) // Number of people
-#define INFP 0.2f                           // Initial percentage of infected persons
-#define IMM 0.1f                            // Initial percentage of immune persons
-#define S_AVG 0.5f                          // Susceptibility average
-#define ND 3                                // Number of days in simulation
-#define INCUBATION_DAYS 1                   // Incubation period in days
-#define BETA 0.8f                           // Contagiousness factor
-#define ITH 0.2f                            // Infection threshold
-#define IRD 1                               // Infection radius (in cells)
-#define MU 0.6f                             // Probability of recovery after infection
+#define W 10000     // Width of the grid
+#define H 10000     // Height of the grid
+#define MAXP_CELL 3 // Maximum number of people in a cell
+#define NP 10000000
+#define INFP 0.5f         // Initial percentage of infected persons
+#define IMM 0.1f          // Initial percentage of immune persons
+#define S_AVG 0.5f        // Susceptibility average
+#define ND 20             // Number of days in simulation
+#define INCUBATION_DAYS 4 // Incubation period in days
+#define BETA 0.8f         // Contagiousness factor
+#define ITH 0.2f          // Infection threshold
+#define IRD 1             // Infection radius (in cells)
+#define MU 0.6f           // Probability of recovery after infection
+
+void debugState(const char *phase,
+                int *d_x, int *d_y,
+                int *d_cellIdx,
+                int *d_incub, float *d_susc,
+                int *d_cellCount, int *d_cellStart)
+{
+    const int P_SAMPLE = NP; // show all persons
+    const int G_PATCH = W;   // full grid width in this tiny example
+
+    printf("===== DEBUG: %s =====\n", phase);
+
+    // 1) copy down all person data
+    int h_x[P_SAMPLE], h_y[P_SAMPLE], h_cellIdx[P_SAMPLE], h_incub[P_SAMPLE];
+    float h_susc[P_SAMPLE];
+    cudaMemcpy(h_x, d_x, sizeof(int) * P_SAMPLE, cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_y, d_y, sizeof(int) * P_SAMPLE, cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_cellIdx, d_cellIdx, sizeof(int) * P_SAMPLE, cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_incub, d_incub, sizeof(int) * P_SAMPLE, cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_susc, d_susc, sizeof(float) * P_SAMPLE, cudaMemcpyDeviceToHost);
+
+    // 2) pretty‐print a table of each person
+    printf(" Persons:\n");
+    printf("  ID | CellIdx |   (x,y)   | IncubDays | Susc\n");
+    printf(" ----+---------+-----------+-----------+------\n");
+    for (int i = 0; i < P_SAMPLE; ++i)
+    {
+        printf(" %3d | %7d | (%2d,%2d) |     %2d    | %.2f\n",
+               i,
+               h_cellIdx[i],
+               h_x[i],
+               h_y[i],
+               h_incub[i],
+               h_susc[i]);
+    }
+
+    // 3) dump grid cell counts (top‐left G_PATCH×G_PATCH)
+    int h_grid[G_PATCH * G_PATCH];
+    cudaMemcpy(h_grid, d_cellCount,
+               sizeof(int) * G_PATCH * G_PATCH,
+               cudaMemcpyDeviceToHost);
+    printf("\n Grid cellCount [0..%d)x[0..%d):\n", G_PATCH, G_PATCH);
+    for (int y = 0; y < G_PATCH; ++y)
+    {
+        printf("  ");
+        for (int x = 0; x < G_PATCH; ++x)
+        {
+            printf("%2d ", h_grid[x + y * G_PATCH]);
+        }
+        printf("\n");
+    }
+
+    // 4) overall status summary
+    int dead = 0, infected = 0, immune = 0, susceptible = 0;
+    for (int i = 0; i < P_SAMPLE; ++i)
+    {
+        if (h_x[i] < 0)
+        {
+            dead++;
+        }
+        else if (h_incub[i] > 0)
+        {
+            infected++;
+        }
+        else if (h_susc[i] == 0.0f)
+        {
+            immune++;
+        }
+        else
+        {
+            susceptible++;
+        }
+    }
+    printf("\n Summary: dead=%d, infected=%d, immune=%d, susceptible=%d\n",
+           dead, infected, immune, susceptible);
+
+    printf("============================\n\n");
+}
 
 typedef struct
 {
@@ -145,32 +225,16 @@ void log_memory_usage(const char *label)
     printf("---------------------------\n\n");
 }
 
-float gaussian_random(float mean, float stddev)
+__global__ void init_curand_kernel(curandStatePhilox4_32_10_t *states, unsigned long long seed)
 {
-    float u = ((float)rand() / RAND_MAX);
-    float v = ((float)rand() / RAND_MAX);
-    float s = mean + stddev * sqrt(-2.0f * log(u)) * cos(2.0f * M_PI * v);
-
-    if (s < 0.0f)
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid < NP)
     {
-        return 0.0f;
+        curand_init(seed, tid, 0, &states[tid]);
     }
-
-    if (s > 1.0f)
-    {
-        return 1.0f;
-    }
-
-    return s;
 }
 
-void init_population(
-    int *h_x,
-    int *h_y,
-    int *h_incub,
-    float *h_susc,
-    int *h_newInf,
-    int *h_cellIdx)
+void gen_random_coords(int *h_x, int *h_y)
 {
     int *occupancy_map = (int *)malloc(W * H * sizeof(int));
     TList *available_coords = createTList(W * H);
@@ -183,34 +247,15 @@ void init_population(
         }
     }
 
-    int num_immune = (int)(NP * IMM);
-    int num_infected = (int)(NP * INFP);
-
     srand(time(NULL));
     for (int i = 0; i < NP; ++i)
     {
         Tuple t;
         int idx = getRandomTupleIndex(available_coords, &t);
-        printf("idx: %d, x: %d, y: %d\n", idx, t.x, t.y);
 
         h_x[i] = t.x;
         h_y[i] = t.y;
-        h_newInf[i] = 0;
-        h_cellIdx[i] = h_x[i] + h_y[i] * W;
         occupancy_map[t.x + t.y * W]++;
-
-        if (i < num_immune)
-        {
-            h_susc[i] = 0.0f;
-            h_incub[i] = 0;
-        }
-        else
-        {
-            // assign incubation period only to infected people
-            h_incub[i] = (i < num_immune + num_infected) ? (INCUBATION_DAYS + 1) : 0;
-            // assign susceptibility to both susceptible and infected people
-            h_susc[i] = gaussian_random(S_AVG, 0.1f);
-        }
 
         if (occupancy_map[t.x + t.y * W] == MAXP_CELL)
         {
@@ -222,6 +267,42 @@ void init_population(
     freeTList(available_coords);
 }
 
+__global__ void init_population_kernel(int *d_x, int *d_y, int *d_incub, float *d_susc, int *d_newInf, int *d_cellIdx, curandStatePhilox4_32_10_t *states)
+{
+    float mean = S_AVG;
+    float stddev = 0.1f;
+    int num_immune = (int)(NP * IMM);
+    int num_infected = (int)(NP * INFP);
+
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= NP)
+        return;
+
+    d_cellIdx[i] = d_x[i] + d_y[i] * W;
+    d_newInf[i] = 0;
+
+    if (i < num_immune)
+    {
+        d_incub[i] = 0;
+        d_susc[i] = 0.0f;
+    }
+    else
+    {
+        d_incub[i] = (i < num_immune + num_infected) ? (INCUBATION_DAYS + 1) : 0;
+
+        float g = curand_normal(&states[i]);
+        d_susc[i] = fminf(1.0f, fmaxf(1e-6f, mean + stddev * g));
+    }
+}
+
+struct IsLive
+{
+    __host__ __device__ bool operator()(const thrust::tuple<int, int, int, float, int, int> &t) const
+    {
+        return thrust::get<0>(t) >= 0;
+    }
+};
+
 void rebuildCellMap(
     int *d_cellIdx,
     int *d_x,
@@ -230,73 +311,66 @@ void rebuildCellMap(
     int *d_incub,
     int *d_newInf,
     int *d_cellStart,
-    int *d_cellCount)
+    int *d_cellCount,
+    int *tmpKeys,
+    int *tmpCounts)
 {
-    const int maxCells = W * H;
     using thrust::constant_iterator;
+    using thrust::device;
     using thrust::device_ptr;
-    using thrust::device_vector;
     using thrust::make_tuple;
     using thrust::make_zip_iterator;
 
-    device_ptr<int> keys_begin(d_cellIdx), keys_end = keys_begin + NP;
+    // 1) pack values into a zip‐iterator
+    auto zip_begin = make_zip_iterator(
+        make_tuple(
+            device_ptr<int>(d_cellIdx),
+            device_ptr<int>(d_x),
+            device_ptr<int>(d_y),
+            device_ptr<float>(d_susc),
+            device_ptr<int>(d_incub),
+            device_ptr<int>(d_newInf)));
+    auto zip_end = zip_begin + NP;
 
+    // 2) partition out the “dead” cells
+    auto live_end = thrust::stable_partition(device, zip_begin, zip_end, IsLive());
+    int live_count = live_end - zip_begin;
+
+    // 3) sort live cells by their cellIdx (keys are in-place in d_cellIdx[]; values are zipped)
     thrust::sort_by_key(
-        keys_begin, keys_end,
-        thrust::make_zip_iterator(
-            thrust::make_tuple(
-                thrust::device_pointer_cast(d_x),
-                thrust::device_pointer_cast(d_y),
-                thrust::device_pointer_cast(d_susc),
-                thrust::device_pointer_cast(d_incub),
-                thrust::device_pointer_cast(d_newInf))));
+        device,
+        d_cellIdx,
+        d_cellIdx + live_count,
+        make_zip_iterator(make_tuple(d_x, d_y, d_susc, d_incub, d_newInf)));
 
-    device_vector<int> d_uniqueKeys(maxCells);
-    device_vector<int> d_counts(maxCells);
-
-    auto reduce_end = thrust::reduce_by_key(
-        keys_begin, keys_end,
+    // 4) run‐length encode (i.e. unique keys + counts)
+    //    → writes unique keys into tmpKeys[0..numUnique)
+    //    → writes counts    into tmpCounts[0..numUnique)
+    int *endKeyPtr;
+    int *endCountPtr;
+    thrust::tie(endKeyPtr, endCountPtr) = thrust::reduce_by_key(
+        device,
+        d_cellIdx, d_cellIdx + live_count,
         constant_iterator<int>(1),
-        d_uniqueKeys.begin(),
-        d_counts.begin());
-    int unique_cells = reduce_end.first - d_uniqueKeys.begin();
+        tmpKeys,
+        tmpCounts);
+    int numUnique = endKeyPtr - tmpKeys;
 
-    device_vector<int> d_offsets(unique_cells);
+    // 5) exclusive‐scan counts → directly into d_cellStart[key]
     thrust::exclusive_scan(
-        d_counts.begin(),
-        d_counts.begin() + unique_cells,
-        d_offsets.begin(),
+        device,
+        tmpCounts, tmpCounts + numUnique,
+        thrust::make_permutation_iterator(
+            device_ptr<int>(d_cellStart),
+            device_ptr<int>(tmpKeys)),
         0);
 
-    device_vector<int> d_cellStart_vec(maxCells, -1);
-    device_vector<int> d_cellCount_vec(maxCells, 0);
-
+    // 6) scatter counts → directly into d_cellCount[key]
     thrust::scatter(
-        d_offsets.begin(), d_offsets.begin() + unique_cells,
-        d_uniqueKeys.begin(),
-        d_cellStart_vec.begin());
-    thrust::scatter(
-        d_counts.begin(), d_counts.begin() + unique_cells,
-        d_uniqueKeys.begin(),
-        d_cellCount_vec.begin());
-
-    thrust::copy(
-        d_cellStart_vec.begin(),
-        d_cellStart_vec.end(),
-        device_ptr<int>(d_cellStart));
-    thrust::copy(
-        d_cellCount_vec.begin(),
-        d_cellCount_vec.end(),
-        device_ptr<int>(d_cellCount));
-}
-
-__global__ void init_curand_kernel(curandStatePhilox4_32_10_t *states, unsigned long long seed)
-{
-    int tid = blockIdx.x * blockDim.x + threadIdx.x;
-    if (tid < NP)
-    {
-        curand_init(seed, tid, 0, &states[tid]);
-    }
+        device,
+        tmpCounts, tmpCounts + numUnique,
+        tmpKeys,
+        d_cellCount);
 }
 
 __device__ bool isImmune(int i, float *d_susc)
@@ -304,14 +378,14 @@ __device__ bool isImmune(int i, float *d_susc)
     return d_susc[i] == 0.0f;
 }
 
-__device__ bool isDead(int i, int *d_x, int *d_y)
+__device__ bool isDead(int i, int *d_cellIdx)
 {
-    return d_x[i] < 0 || d_y[i] < 0;
+    return d_cellIdx[i] < 0;
 }
 
-__device__ bool isInfected(int i, int *d_incub, int *d_x, int *d_y)
+__device__ bool isInfected(int i, int *d_incub)
 {
-    return d_incub[i] > 0 && !isDead(i, d_x, d_y);
+    return d_incub[i] > 0;
 }
 
 __global__ void infect_kernel(
@@ -327,18 +401,13 @@ __global__ void infect_kernel(
     if (tid >= NP)
         return;
 
-    if (!isInfected(tid, d_incub, d_x, d_y))
+    if (!isInfected(tid, d_incub))
         return;
 
-    // print information about the person
-    printf("Person %d: (%d, %d), incub: %d, susc: %.2f, newInf: %d\n",
-           tid, d_x[tid], d_y[tid], d_incub[tid], d_susc[tid], d_newInf[tid]);
-
-    // decrement incubation
     d_incub[tid]--;
 
     int x0 = d_x[tid], y0 = d_y[tid];
-    // loop over neighborhood
+
     for (int dy = -IRD; dy <= IRD; ++dy)
     {
         int y = y0 + dy;
@@ -358,20 +427,13 @@ __global__ void infect_kernel(
                 if (i == tid)
                     continue;
 
-                // print information about the person found in the cell and tell the person that is scanning it
-                printf("Person %d: (%d, %d), scanned by person %d, incub: %d, susc: %.2f, newInf: %d\n",
-                       i, d_x[i], d_y[i], tid, d_incub[i], d_susc[i], d_newInf[i]);
-                if (!isInfected(i, d_incub, d_x, d_y) && !isImmune(i, d_susc))
+                if (!isInfected(i, d_incub) && !isImmune(i, d_susc))
                 {
                     float infec = BETA * d_susc[i];
                     if (infec > ITH)
                     {
                         // If d_newInf[i] is 0, it sets it to 1 and returns 0 → this thread succeeds
-                        if (atomicCAS(&d_newInf[i], 0, 1) == 0)
-                        {
-                            // This thread was the first to infect
-                            printf("Person %d infected by person %d\n", i, tid);
-                        }
+                        atomicCAS(&d_newInf[i], 0, 1);
                     }
                 }
             }
@@ -385,14 +447,15 @@ __global__ void status_kernel(
     int *d_incub,
     float *d_susc,
     int *d_newInf,
+    int *d_cellIdx,
+    int *d_cellCount,
     curandStatePhilox4_32_10_t *d_curandStates)
 {
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
     if (tid >= NP)
         return;
 
-    // If infected & last day
-    if (isInfected(tid, d_incub, d_x, d_y) && d_incub[tid] == 1)
+    if (isInfected(tid, d_incub) && d_incub[tid] == 1)
     {
         float p = curand_uniform(&d_curandStates[tid]);
         if (p < MU)
@@ -401,49 +464,90 @@ __global__ void status_kernel(
             if ((curand(&d_curandStates[tid]) & 1) == 0)
             {
                 d_susc[tid] = 0.0f;
-                // print information about the person
-                printf("Person %d recovered and is now immune\n", tid);
             }
 
             d_incub[tid] = 0;
-            printf("Person %d recovered\n", tid);
         }
         else
         {
-            d_x[tid] = d_y[tid] = -1;
-            printf("Person %d died\n", tid);
+            int cellPos = d_cellIdx[tid];
+            if (cellPos >= 0)
+            {
+                atomicSub(&d_cellCount[cellPos], 1);
+            }
+            d_cellIdx[tid] = -1;
+            d_x[tid] = -1;
+            d_y[tid] = -1;
+            d_incub[tid] = 0;
         }
     }
 
-    // Commit new infections
     if (d_newInf[tid])
     {
         d_incub[tid] = INCUBATION_DAYS + 1;
         d_newInf[tid] = 0;
-        printf("Person %d is now infected\n", tid);
     }
 }
 
-int main()
+__global__ void move_kernel(
+    int *d_x,
+    int *d_y,
+    int *d_cellIdx,
+    int *d_cellCount,
+    curandStatePhilox4_32_10_t *states)
 {
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid >= NP)
+        return;
+
+    if (isDead(tid, d_cellIdx))
+        return;
+
+    unsigned int r1 = curand(&states[tid]);
+    unsigned int r2 = curand(&states[tid]);
+    int dx = (int)(r1 % 3) - 1;
+    int dy = (int)(r2 % 3) - 1;
+
+    int oldX = d_x[tid], oldY = d_y[tid];
+    int newX = oldX + dx, newY = oldY + dy;
+
+    if (newX < 0 || newX >= W || newY < 0 || newY >= H)
+        return;
+    int oldCell = oldX + oldY * W;
+    int newCell = newX + newY * W;
+    if (newCell == oldCell)
+        return;
+
+    int prev = atomicAdd(&d_cellCount[newCell], 1);
+    if (prev >= MAXP_CELL)
+    {
+        atomicSub(&d_cellCount[newCell], 1);
+        return;
+    }
+
+    atomicSub(&d_cellCount[oldCell], 1);
+
+    d_x[tid] = newX;
+    d_y[tid] = newY;
+    d_cellIdx[tid] = newCell;
+}
+
+int main(int argc, char **argv)
+{
+    bool debugEnabled = false;
+    for (int i = 1; i < argc; ++i)
+        if (strcmp(argv[i], "--debug") == 0)
+            debugEnabled = true;
+
     printf("Simulation started\n");
     struct timespec start, end;
     clock_gettime(CLOCK_MONOTONIC, &start);
 
-    log_memory_usage("Before host allocations");
+    log_memory_usage("Start");
 
-    // Flattening of the People array in host
     int *h_x = (int *)malloc(NP * sizeof(int));
     int *h_y = (int *)malloc(NP * sizeof(int));
-    int *h_incub = (int *)malloc(NP * sizeof(int));
-    float *h_susc = (float *)malloc(NP * sizeof(float));
-    int *h_newInf = (int *)calloc(NP, sizeof(int));
 
-    int *h_cellIdx = (int *)malloc(NP * sizeof(int));
-
-    log_memory_usage("After host allocations");
-
-    // Flattening of the People array in device
     int *d_x;
     int *d_y;
     int *d_incub;
@@ -456,176 +560,63 @@ int main()
     cudaMalloc(&d_newInf, NP * sizeof(int));
 
     int *d_cellIdx;
+    int *d_cellStart;
+    int *d_cellCount;
     cudaMalloc(&d_cellIdx, NP * sizeof(int));
-
-    int *d_cellStart; // tells me where the first person in a cell c is in the d_cellIdx array, -1 if empty
-    int *d_cellCount; // tells me how many people are in the cell c, 0 if empty
     cudaMalloc(&d_cellStart, W * H * sizeof(int));
     cudaMalloc(&d_cellCount, W * H * sizeof(int));
 
-    // use to manage the constraint on the number of people in a cell
-    thrust::device_vector<int> d_ranks(NP);
-
-    // Device pointer for RNG state per thread
-    curandStatePhilox4_32_10_t *d_curandStates;
-    cudaMalloc(&d_curandStates, NP * sizeof(curandStatePhilox4_32_10_t));
-
-    log_memory_usage("After device allocations");
-
-    init_population(
-        h_x,
-        h_y,
-        h_incub,
-        h_susc,
-        h_newInf,
-        h_cellIdx);
-
-    log_memory_usage("After population init (host)");
-
-    // print the situation of the arrays in a way that is really readable
-    // like print the matrix and the people in it
-    // and a list of people with their properties
-    // and also a ledgend of how many people per state there are state are infected, immune, susceptible
-
-    for (int i = 0; i < NP; ++i)
-    {
-        printf("Person %d: (%d, %d), incub: %d, susc: %.2f, newInf: %d\n",
-               i, h_x[i], h_y[i], h_incub[i], h_susc[i], h_newInf[i]);
-    }
-    // show the matrix
-    printf("Matrix:\n");
-    for (int y = 0; y < H; ++y)
-    {
-        for (int x = 0; x < W; ++x)
-        {
-            int count = 0;
-            for (int i = 0; i < NP; ++i)
-            {
-                if (h_x[i] == x && h_y[i] == y)
-                {
-                    count++;
-                }
-            }
-            printf("%d ", count);
-        }
-        printf("\n");
-    }
-
-    // print the h_cellIdx array
-    printf("Cell index:\n");
-    for (int i = 0; i < NP; ++i)
-    {
-        printf("%d ", h_cellIdx[i]);
-    }
-
-    cudaMemcpy(d_x, h_x, NP * sizeof(int), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_y, h_y, NP * sizeof(int), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_incub, h_incub, NP * sizeof(int), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_susc, h_susc, NP * sizeof(float), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_newInf, h_newInf, NP * sizeof(int), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_cellIdx, h_cellIdx, NP * sizeof(int), cudaMemcpyHostToDevice);
-
-    free(h_x);
-    free(h_y);
-    free(h_incub);
-    free(h_susc);
-    free(h_newInf);
-    // free(h_cellIdx);
-
-    log_memory_usage("After host→device memcpy");
+    int *tmpKeys;
+    int *tmpCounts;
+    cudaMalloc(&tmpKeys, NP * sizeof(int));
+    cudaMalloc(&tmpCounts, NP * sizeof(int));
 
     int threads = 256;
     int blocks = (NP + threads - 1) / threads;
 
-    rebuildCellMap(
-        d_cellIdx,
-        d_x,
-        d_y,
-        d_susc,
-        d_incub,
-        d_newInf,
-        d_cellStart,
-        d_cellCount);
+    curandStatePhilox4_32_10_t *d_curandStates;
+    cudaMalloc(&d_curandStates, NP * sizeof(curandStatePhilox4_32_10_t));
+    init_curand_kernel<<<blocks, threads>>>(d_curandStates, (unsigned long long)time(NULL));
+
+    gen_random_coords(h_x, h_y);
+    cudaMemcpy(d_x, h_x, NP * sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_y, h_y, NP * sizeof(int), cudaMemcpyHostToDevice);
+    free(h_x);
+    free(h_y);
+
+    init_population_kernel<<<blocks, threads>>>(d_x, d_y, d_incub, d_susc, d_newInf, d_cellIdx, d_curandStates);
+
+    log_memory_usage("After population init");
+
+    rebuildCellMap(d_cellIdx, d_x, d_y, d_susc, d_incub, d_newInf, d_cellStart, d_cellCount, tmpKeys, tmpCounts);
 
     log_memory_usage("After rebuildCellMap");
 
-    // show to me the situation of the device arrays after the rebuildCellMap
-    // so recreate the structures on the host and copy the data from the device to the host
-    // then print the situation of the arrays in a way that is really readable
-    int *h_cellStart = (int *)malloc(W * H * sizeof(int));
-    int *h_cellCount = (int *)malloc(W * H * sizeof(int));
-    cudaMemcpy(h_cellIdx, d_cellIdx, NP * sizeof(int), cudaMemcpyDeviceToHost);
-    cudaMemcpy(h_cellStart, d_cellStart, W * H * sizeof(int), cudaMemcpyDeviceToHost);
-    cudaMemcpy(h_cellCount, d_cellCount, W * H * sizeof(int), cudaMemcpyDeviceToHost);
-    printf("Cell index:\n");
-    for (int i = 0; i < NP; ++i)
+    if (debugEnabled)
     {
-        printf("%d ", h_cellIdx[i]);
+        debugState("after rebuildCellMap",
+                   d_x, d_y, d_cellIdx, d_incub, d_susc, d_cellCount,
+                   d_cellStart);
     }
-    printf("Cell start:\n");
-    for (int i = 0; i < W * H; ++i)
-    {
-        printf("%d ", h_cellStart[i]);
-    }
-    printf("\nCell count:\n");
-    for (int i = 0; i < W * H; ++i)
-    {
-        printf("%d ", h_cellCount[i]);
-    }
-    printf("\n");
-
-    init_curand_kernel<<<blocks, threads>>>(d_curandStates, time(NULL));
 
     for (int day = 0; day < ND; ++day)
     {
-        infect_kernel<<<blocks, threads>>>(
-            d_x,
-            d_y,
-            d_incub,
-            d_susc,
-            d_newInf,
-            d_cellStart,
-            d_cellCount);
+        infect_kernel<<<blocks, threads>>>(d_x, d_y, d_incub, d_susc, d_newInf, d_cellStart, d_cellCount);
+        status_kernel<<<blocks, threads>>>(d_x, d_y, d_incub, d_susc, d_newInf, d_cellIdx, d_cellCount, d_curandStates);
+        move_kernel<<<blocks, threads>>>(d_x, d_y, d_cellIdx, d_cellCount, d_curandStates);
+        rebuildCellMap(d_cellIdx, d_x, d_y, d_susc, d_incub, d_newInf, d_cellStart, d_cellCount, tmpKeys, tmpCounts);
+        log_memory_usage("After day");
 
-        status_kernel<<<blocks, threads>>>(
-            d_x,
-            d_y,
-            d_incub,
-            d_susc,
-            d_newInf,
-            d_curandStates);
+        if (debugEnabled)
+        {
+            char label[32];
+            snprintf(label, sizeof(label), "after day %d", day);
+            debugState(label,
+                       d_x, d_y, d_cellIdx, d_incub, d_susc, d_cellCount,
+                       d_cellStart);
+        }
 
         cudaDeviceSynchronize();
-
-        rebuildCellMap(
-            d_cellIdx,
-            d_x,
-            d_y,
-            d_susc,
-            d_incub,
-            d_newInf,
-            d_cellStart,
-            d_cellCount);
-
-        cudaMemcpy(h_cellIdx, d_cellIdx, NP * sizeof(int), cudaMemcpyDeviceToHost);
-        cudaMemcpy(h_cellStart, d_cellStart, W * H * sizeof(int), cudaMemcpyDeviceToHost);
-        cudaMemcpy(h_cellCount, d_cellCount, W * H * sizeof(int), cudaMemcpyDeviceToHost);
-        printf("Cell index:\n");
-        for (int i = 0; i < NP; ++i)
-        {
-            printf("%d ", h_cellIdx[i]);
-        }
-        printf("Cell start:\n");
-        for (int i = 0; i < W * H; ++i)
-        {
-            printf("%d ", h_cellStart[i]);
-        }
-        printf("\nCell count:\n");
-        for (int i = 0; i < W * H; ++i)
-        {
-            printf("%d ", h_cellCount[i]);
-        }
-        printf("\n");
     }
 
     cudaFree(d_x);

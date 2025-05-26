@@ -2,8 +2,8 @@
 
 TList *createTList(int capacity)
 {
-    TList *arr = malloc(sizeof(TList));
-    arr->data = malloc(sizeof(Tuple) * capacity);
+    TList *arr = (TList *)malloc(sizeof(TList));
+    arr->data = (Tuple *)malloc(capacity * sizeof(Tuple));
     arr->size = 0;
     arr->capacity = capacity;
     return arr;
@@ -36,6 +36,16 @@ int getRandomTupleIndex(unsigned int seed, TList *arr, Tuple *out)
         return -1;
 
     int idx = rand_r(&seed) % arr->size;
+    *out = arr->data[idx];
+    return idx;
+}
+
+int getRandomTupleIndexSerial(TList *arr, Tuple *out)
+{
+    if (arr->size == 0)
+        return -1;
+
+    int idx = rand() % arr->size;
     *out = arr->data[idx];
     return idx;
 }
