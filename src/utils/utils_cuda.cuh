@@ -22,6 +22,5 @@ void log_memory_usage(const char *label);
 
 void debugState(const char *phase,
                 int *d_x, int *d_y,
-                int *d_cellIdx,
                 int *d_incub, float *d_susc,
                 int *d_cellCount, int *d_cellStart);

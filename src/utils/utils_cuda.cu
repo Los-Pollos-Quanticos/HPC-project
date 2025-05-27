@@ -86,7 +86,6 @@ void log_memory_usage(const char *label)
 
 void debugState(const char *phase,
                 int *d_x, int *d_y,
-                int *d_cellIdx,
                 int *d_incub, float *d_susc,
                 int *d_cellCount, int *d_cellStart)
 {
@@ -96,23 +95,21 @@ void debugState(const char *phase,
     printf("===== DEBUG: %s =====\n", phase);
 
     // 1) copy down all person data
-    int h_x[P_SAMPLE], h_y[P_SAMPLE], h_cellIdx[P_SAMPLE], h_incub[P_SAMPLE];
+    int h_x[P_SAMPLE], h_y[P_SAMPLE], h_incub[P_SAMPLE];
     float h_susc[P_SAMPLE];
     cudaMemcpy(h_x, d_x, sizeof(int) * P_SAMPLE, cudaMemcpyDeviceToHost);
     cudaMemcpy(h_y, d_y, sizeof(int) * P_SAMPLE, cudaMemcpyDeviceToHost);
-    cudaMemcpy(h_cellIdx, d_cellIdx, sizeof(int) * P_SAMPLE, cudaMemcpyDeviceToHost);
     cudaMemcpy(h_incub, d_incub, sizeof(int) * P_SAMPLE, cudaMemcpyDeviceToHost);
     cudaMemcpy(h_susc, d_susc, sizeof(float) * P_SAMPLE, cudaMemcpyDeviceToHost);
 
     // 2) pretty‐print a table of each person
     printf(" Persons:\n");
-    printf("  ID | CellIdx |   (x,y)   | IncubDays | Susc\n");
-    printf(" ----+---------+-----------+-----------+------\n");
+    printf("  ID |   (x,y)   | IncubDays | Susc\n");
+    printf(" ----+-----------+-----------+------\n");
     for (int i = 0; i < P_SAMPLE; ++i)
     {
-        printf(" %3d | %7d | (%2d,%2d) |     %2d    | %.2f\n",
+        printf(" %3d | (%2d,%2d) |     %2d    | %.2f\n",
                i,
-               h_cellIdx[i],
                h_x[i],
                h_y[i],
                h_incub[i],

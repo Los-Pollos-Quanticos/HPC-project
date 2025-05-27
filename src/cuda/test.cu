@@ -1,33 +1,23 @@
-#include <thrust/device_ptr.h>
-#include <thrust/sort.h>
-#include <thrust/functional.h>
-#include <thrust/iterator/zip_iterator.h>
-#include <thrust/scan.h>
-#include <thrust/reduce.h>
-#include <thrust/host_vector.h>
-#include <thrust/device_vector.h>
-#include <thrust/iterator/constant_iterator.h>
-#include <thrust/tuple.h>
-#include <thrust/scatter.h>
-#include <thrust/copy.h>
-#include <thrust/partition.h>
-#include <thrust/binary_search.h>
-
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <curand_kernel.h>
 #include "../utils/utils_cuda.cuh"
 
-__global__ void init_population_kernel(int *d_x, int *d_y, int *d_incub, float *d_susc, int *d_newInf, int *d_cellIdx, curandStatePhilox4_32_10_t *states)
+__global__ void init_population_kernel(
+    int *d_x, int *d_y, int *d_incub, float *d_susc,
+    int *d_newInf, int *d_slotIndex,
+    curandStatePhilox4_32_10_t *states,
+    int num_immune, int num_infected, float stddev)
 {
-    float mean = S_AVG;
-    float stddev = 0.1f;
-    int num_immune = (int)(NP * IMM);
-    int num_infected = (int)(NP * INFP);
-
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= NP)
         return;
 
-    d_cellIdx[i] = d_x[i] + d_y[i] * W;
+    // compute initial cell
     d_newInf[i] = 0;
+    // mark slotIndex invalid until built
+    d_slotIndex[i] = -1;
 
     if (i < num_immune)
     {
@@ -37,125 +27,52 @@ __global__ void init_population_kernel(int *d_x, int *d_y, int *d_incub, float *
     else
     {
         d_incub[i] = (i < num_immune + num_infected) ? (INCUBATION_DAYS + 1) : 0;
-
         float g = curand_normal(&states[i]);
-        d_susc[i] = fminf(1.0f, fmaxf(1e-6f, mean + stddev * g));
+        d_susc[i] = fminf(1.0f, fmaxf(1e-6f, S_AVG + stddev * g));
     }
 }
 
-struct IsLive
-{
-    __host__ __device__ bool operator()(const thrust::tuple<int, int, int, float, int, int> &t) const
-    {
-        return thrust::get<0>(t) >= 0;
-    }
-};
-
-void rebuildCellMap(
-    int *d_cellIdx,
-    int *d_x,
-    int *d_y,
-    float *d_susc,
-    int *d_incub,
-    int *d_newInf,
-    int *d_cellStart,
-    int *d_cellCount,
-    int *tmpKeys,
-    int *tmpCounts)
-{
-    using thrust::constant_iterator;
-    using thrust::device;
-    using thrust::device_ptr;
-    using thrust::make_tuple;
-    using thrust::make_zip_iterator;
-
-    // 1) pack values into a zip‐iterator
-    auto zip_begin = make_zip_iterator(
-        make_tuple(
-            device_ptr<int>(d_cellIdx),
-            device_ptr<int>(d_x),
-            device_ptr<int>(d_y),
-            device_ptr<float>(d_susc),
-            device_ptr<int>(d_incub),
-            device_ptr<int>(d_newInf)));
-    auto zip_end = zip_begin + NP;
-
-    // 2) partition out the “dead” cells
-    auto live_end = thrust::stable_partition(device, zip_begin, zip_end, IsLive());
-    int live_count = live_end - zip_begin;
-
-    // 3) sort live cells by their cellIdx (keys are in-place in d_cellIdx[]; values are zipped)
-    thrust::sort_by_key(
-        device,
-        d_cellIdx,
-        d_cellIdx + live_count,
-        make_zip_iterator(make_tuple(d_x, d_y, d_susc, d_incub, d_newInf)));
-
-    // 4) run‐length encode (i.e. unique keys + counts)
-    //    → writes unique keys into tmpKeys[0..numUnique)
-    //    → writes counts    into tmpCounts[0..numUnique)
-    int *endKeyPtr;
-    int *endCountPtr;
-    thrust::tie(endKeyPtr, endCountPtr) = thrust::reduce_by_key(
-        device,
-        d_cellIdx, d_cellIdx + live_count,
-        constant_iterator<int>(1),
-        tmpKeys,
-        tmpCounts);
-    int numUnique = endKeyPtr - tmpKeys;
-
-    // 5) exclusive‐scan counts → directly into d_cellStart[key]
-    thrust::exclusive_scan(
-        device,
-        tmpCounts, tmpCounts + numUnique,
-        thrust::make_permutation_iterator(
-            device_ptr<int>(d_cellStart),
-            device_ptr<int>(tmpKeys)),
-        0);
-
-    // 6) scatter counts → directly into d_cellCount[key]
-    thrust::scatter(
-        device,
-        tmpCounts, tmpCounts + numUnique,
-        tmpKeys,
-        d_cellCount);
-}
-
-__device__ bool isImmune(int i, float *d_susc)
-{
-    return d_susc[i] == 0.0f;
-}
-
-__device__ bool isDead(int i, int *d_cellIdx)
-{
-    return d_cellIdx[i] < 0;
-}
-
-__device__ bool isInfected(int i, int *d_incub)
-{
-    return d_incub[i] > 0;
-}
-
-__global__ void infect_kernel(
-    int *d_x,
-    int *d_y,
-    int *d_incub,
-    float *d_susc,
-    int *d_newInf,
-    int *d_cellStart,
-    int *d_cellCount)
+// Build initial per-cell slot lists and slotIndex
+__global__ void buildCellSlots(
+    int *d_x, int *d_y, int *d_cellCount,
+    int *d_cellSlots, int *d_slotIndex)
 {
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
     if (tid >= NP)
         return;
 
-    if (!isInfected(tid, d_incub))
+    int c = d_x[tid] + d_y[tid] * W;
+    if (c < 0)
+    {
+        d_slotIndex[tid] = -1;
         return;
+    }
+    // append this particle to cell c
+    int pos = atomicAdd(&d_cellCount[c], 1);
+    if (pos < MAXP_CELL)
+    {
+        d_cellSlots[c * MAXP_CELL + pos] = tid;
+        d_slotIndex[tid] = pos;
+    }
+}
 
+// Helpers
+__device__ bool isImmune(int i, float *d_susc) { return d_susc[i] == 0.0f; }
+__device__ bool isDead(int i, int *d_x, int *d_y) { return d_x[i] < 0 || d_y[i] < 0; }
+__device__ bool isInfected(int i, int *d_incub) { return d_incub[i] > 0; }
+
+// Infect neighbors by scanning slots
+__global__ void infect_kernel(
+    int *d_x, int *d_y, int *d_incub, float *d_susc,
+    int *d_newInf, int *d_cellCount, int *d_cellSlots)
+{
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid >= NP || !isInfected(tid, d_incub))
+        return;
+    // decrement incubation
     d_incub[tid]--;
 
     int x0 = d_x[tid], y0 = d_y[tid];
-
     for (int dy = -IRD; dy <= IRD; ++dy)
     {
         int y = y0 + dy;
@@ -166,70 +83,68 @@ __global__ void infect_kernel(
             int x = x0 + dx;
             if (x < 0 || x >= W)
                 continue;
-
             int c = x + y * W;
-            int start = d_cellStart[c];
             int count = d_cellCount[c];
-            for (int i = start; i < start + count; ++i)
+            int base = c * MAXP_CELL;
+            for (int s = 0; s < count; ++s)
             {
+                int i = d_cellSlots[base + s];
                 if (i == tid)
                     continue;
-
                 if (!isInfected(i, d_incub) && !isImmune(i, d_susc))
                 {
                     float infec = BETA * d_susc[i];
                     if (infec > ITH)
-                    {
-                        // If d_newInf[i] is 0, it sets it to 1 and returns 0 → this thread succeeds
                         atomicCAS(&d_newInf[i], 0, 1);
-                    }
                 }
             }
         }
     }
 }
 
+// Status updates: recover or die, updating slots incrementally
 __global__ void status_kernel(
-    int *d_x,
-    int *d_y,
-    int *d_incub,
-    float *d_susc,
-    int *d_newInf,
-    int *d_cellIdx,
-    int *d_cellCount,
-    curandStatePhilox4_32_10_t *d_curandStates)
+    int *d_x, int *d_y, int *d_incub, float *d_susc,
+    int *d_newInf, int *d_cellCount,
+    int *d_cellSlots, int *d_slotIndex,
+    curandStatePhilox4_32_10_t *states)
 {
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
     if (tid >= NP)
         return;
 
+    // if infection ends
     if (isInfected(tid, d_incub) && d_incub[tid] == 1)
     {
-        float p = curand_uniform(&d_curandStates[tid]);
-        if (p < MU)
+        float p = curand_uniform(&states[tid]);
+        bool dies = (p >= MU);
+        if (!dies)
         {
-            // recover
-            if ((curand(&d_curandStates[tid]) & 1) == 0)
-            {
+            // recover, maybe become immune
+            if ((curand(&states[tid]) & 1) == 0)
                 d_susc[tid] = 0.0f;
-            }
-
             d_incub[tid] = 0;
         }
         else
         {
-            int cellPos = d_cellIdx[tid];
-            if (cellPos >= 0)
+            // death: remove from bucket
+            int c = d_x[tid] + d_y[tid] * W;
+            int slot = d_slotIndex[tid];
+            int oldCount = atomicSub(&d_cellCount[c], 1);
+            int last = oldCount - 1;
+            if (slot != last)
             {
-                atomicSub(&d_cellCount[cellPos], 1);
+                int other = d_cellSlots[c * MAXP_CELL + last];
+                d_cellSlots[c * MAXP_CELL + slot] = other;
+                d_slotIndex[other] = slot;
             }
-            d_cellIdx[tid] = -1;
-            d_x[tid] = -1;
-            d_y[tid] = -1;
+            // mark dead
+            d_slotIndex[tid] = -1;
+            d_x[tid] = d_y[tid] = -1;
             d_incub[tid] = 0;
         }
     }
-
+    // apply new infections
     if (d_newInf[tid])
     {
         d_incub[tid] = INCUBATION_DAYS + 1;
@@ -237,148 +152,155 @@ __global__ void status_kernel(
     }
 }
 
+// Random movement with incremental slot update
 __global__ void move_kernel(
-    int *d_x,
-    int *d_y,
-    int *d_cellIdx,
-    int *d_cellCount,
+    int *d_x, int *d_y,
+    int *d_cellCount, int *d_cellSlots, int *d_slotIndex,
     curandStatePhilox4_32_10_t *states)
 {
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
-    if (tid >= NP)
-        return;
-
-    if (isDead(tid, d_cellIdx))
+    if (tid >= NP || isDead(tid, d_x, d_y))
         return;
 
     unsigned int r1 = curand(&states[tid]);
     unsigned int r2 = curand(&states[tid]);
-    int dx = (int)(r1 % 3) - 1;
-    int dy = (int)(r2 % 3) - 1;
+    int dx = int(r1 % 3) - 1;
+    int dy = int(r2 % 3) - 1;
 
     int oldX = d_x[tid], oldY = d_y[tid];
     int newX = oldX + dx, newY = oldY + dy;
-
     if (newX < 0 || newX >= W || newY < 0 || newY >= H)
         return;
-    int oldCell = oldX + oldY * W;
-    int newCell = newX + newY * W;
-    if (newCell == oldCell)
+
+    int oldC = oldX + oldY * W;
+    int newC = newX + newY * W;
+    if (newC == oldC)
         return;
 
-    int prev = atomicAdd(&d_cellCount[newCell], 1);
-    if (prev >= MAXP_CELL)
+    // capture old slot for removal
+    int oldSlot = d_slotIndex[tid];
+    // try insert into new cell
+    int pos = atomicAdd(&d_cellCount[newC], 1);
+    if (pos < MAXP_CELL)
     {
-        atomicSub(&d_cellCount[newCell], 1);
-        return;
+        // success: append here
+        d_cellSlots[newC * MAXP_CELL + pos] = tid;
+        d_slotIndex[tid] = pos;
+        d_x[tid] = newX;
+        d_y[tid] = newY;
+        // remove from old cell
+        int oldCount = atomicSub(&d_cellCount[oldC], 1);
+        int last = oldCount - 1;
+        if (oldSlot != last)
+        {
+            int other = d_cellSlots[oldC * MAXP_CELL + last];
+            d_cellSlots[oldC * MAXP_CELL + oldSlot] = other;
+            d_slotIndex[other] = oldSlot;
+        }
     }
-
-    atomicSub(&d_cellCount[oldCell], 1);
-
-    d_x[tid] = newX;
-    d_y[tid] = newY;
-    d_cellIdx[tid] = newCell;
+    else
+    {
+        // rollback
+        atomicSub(&d_cellCount[newC], 1);
+    }
 }
 
 int main(int argc, char **argv)
 {
-    bool debugEnabled = false;
+    bool debug = false;
     for (int i = 1; i < argc; ++i)
-        if (strcmp(argv[i], "--debug") == 0)
-            debugEnabled = true;
+        if (!strcmp(argv[i], "--debug"))
+            debug = true;
 
     printf("Simulation started\n");
-    struct timespec start, end;
-    clock_gettime(CLOCK_MONOTONIC, &start);
+    timespec t0, t1;
+    clock_gettime(CLOCK_MONOTONIC, &t0);
 
-    log_memory_usage("Start");
-
+    // Host coords
     int *h_x = (int *)malloc(NP * sizeof(int));
     int *h_y = (int *)malloc(NP * sizeof(int));
+    gen_random_coords(h_x, h_y);
 
-    int *d_x;
-    int *d_y;
-    int *d_incub;
+    // Device allocations
+    int *d_x, *d_y, *d_incub, *d_newInf, *d_slotIndex;
     float *d_susc;
-    int *d_newInf;
+    int *d_cellCount, *d_cellSlots;
+    curandStatePhilox4_32_10_t *d_states;
+
     cudaMalloc(&d_x, NP * sizeof(int));
     cudaMalloc(&d_y, NP * sizeof(int));
     cudaMalloc(&d_incub, NP * sizeof(int));
-    cudaMalloc(&d_susc, NP * sizeof(float));
     cudaMalloc(&d_newInf, NP * sizeof(int));
+    cudaMalloc(&d_susc, NP * sizeof(float));
+    cudaMalloc(&d_slotIndex, NP * sizeof(int));
 
-    int *d_cellIdx;
-    int *d_cellStart;
-    int *d_cellCount;
-    cudaMalloc(&d_cellIdx, NP * sizeof(int));
-    cudaMalloc(&d_cellStart, W * H * sizeof(int));
     cudaMalloc(&d_cellCount, W * H * sizeof(int));
-
-    int *tmpKeys;
-    int *tmpCounts;
-    cudaMalloc(&tmpKeys, NP * sizeof(int));
-    cudaMalloc(&tmpCounts, NP * sizeof(int));
+    cudaMalloc(&d_cellSlots, W * H * MAXP_CELL * sizeof(int));
+    cudaMalloc(&d_states, NP * sizeof(curandStatePhilox4_32_10_t));
 
     int threads = 256;
     int blocks = (NP + threads - 1) / threads;
 
-    curandStatePhilox4_32_10_t *d_curandStates;
-    cudaMalloc(&d_curandStates, NP * sizeof(curandStatePhilox4_32_10_t));
-    init_curand_kernel<<<blocks, threads>>>(d_curandStates, (unsigned long long)time(NULL));
-
-    gen_random_coords(h_x, h_y);
+    init_curand_kernel<<<blocks, threads>>>(d_states, (unsigned long long)time(nullptr));
     cudaMemcpy(d_x, h_x, NP * sizeof(int), cudaMemcpyHostToDevice);
     cudaMemcpy(d_y, h_y, NP * sizeof(int), cudaMemcpyHostToDevice);
     free(h_x);
     free(h_y);
 
-    init_population_kernel<<<blocks, threads>>>(d_x, d_y, d_incub, d_susc, d_newInf, d_cellIdx, d_curandStates);
+    int num_immune = int(NP * IMM);
+    int num_infected = int(NP * INFP);
+    float stddev = 0.1f;
 
-    log_memory_usage("After population init");
+    init_population_kernel<<<blocks, threads>>>(
+        d_x, d_y, d_incub, d_susc, d_newInf, d_slotIndex, d_states,
+        num_immune, num_infected, stddev);
 
-    rebuildCellMap(d_cellIdx, d_x, d_y, d_susc, d_incub, d_newInf, d_cellStart, d_cellCount, tmpKeys, tmpCounts);
+    // Clear and build initial slots
+    cudaMemset(d_cellCount, 0, W * H * sizeof(int));
+    buildCellSlots<<<blocks, threads>>>(
+        d_x, d_y, d_cellCount,
+        d_cellSlots, d_slotIndex);
 
-    log_memory_usage("After rebuildCellMap");
+    if (debug)
+        debugState("initial build",
+                   d_x, d_y, d_incub, d_susc,
+                   d_cellCount, nullptr);
 
-    if (debugEnabled)
-    {
-        debugState("after rebuildCellMap",
-                   d_x, d_y, d_cellIdx, d_incub, d_susc, d_cellCount,
-                   d_cellStart);
-    }
-
+    // Main loop
     for (int day = 0; day < ND; ++day)
     {
-        infect_kernel<<<blocks, threads>>>(d_x, d_y, d_incub, d_susc, d_newInf, d_cellStart, d_cellCount);
-        status_kernel<<<blocks, threads>>>(d_x, d_y, d_incub, d_susc, d_newInf, d_cellIdx, d_cellCount, d_curandStates);
-        move_kernel<<<blocks, threads>>>(d_x, d_y, d_cellIdx, d_cellCount, d_curandStates);
-        rebuildCellMap(d_cellIdx, d_x, d_y, d_susc, d_incub, d_newInf, d_cellStart, d_cellCount, tmpKeys, tmpCounts);
-        log_memory_usage("After day");
+        infect_kernel<<<blocks, threads>>>(
+            d_x, d_y, d_incub, d_susc, d_newInf,
+            d_cellCount, d_cellSlots);
+        status_kernel<<<blocks, threads>>>(
+            d_x, d_y, d_incub, d_susc, d_newInf, d_cellCount,
+            d_cellSlots, d_slotIndex, d_states);
+        move_kernel<<<blocks, threads>>>(
+            d_x, d_y, d_cellCount, d_cellSlots, d_slotIndex, d_states);
 
-        if (debugEnabled)
+        if (debug)
         {
-            char label[32];
-            snprintf(label, sizeof(label), "after day %d", day);
-            debugState(label,
-                       d_x, d_y, d_cellIdx, d_incub, d_susc, d_cellCount,
-                       d_cellStart);
+            char buf[32];
+            snprintf(buf, 32, "after day %d", day);
+            debugState(buf,
+                       d_x, d_y, d_incub, d_susc,
+                       d_cellCount, nullptr);
         }
-
         cudaDeviceSynchronize();
     }
 
+    // Cleanup
     cudaFree(d_x);
     cudaFree(d_y);
-    cudaFree(d_susc);
     cudaFree(d_incub);
     cudaFree(d_newInf);
-    cudaFree(d_cellIdx);
-    cudaFree(d_cellStart);
+    cudaFree(d_susc);
+    cudaFree(d_slotIndex);
     cudaFree(d_cellCount);
-    cudaFree(d_curandStates);
+    cudaFree(d_cellSlots);
+    cudaFree(d_states);
 
-    log_memory_usage("After cleanup");
-
-    clock_gettime(CLOCK_MONOTONIC, &end);
-    printf("Time: %ld ms\n", get_time_in_ms(start, end));
+    clock_gettime(CLOCK_MONOTONIC, &t1);
+    printf("Time: %ld ms\n", get_time_in_ms(t0, t1));
+    return 0;
 }
