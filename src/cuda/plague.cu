@@ -33,6 +33,15 @@ __global__ void init_population_kernel(
     }
 }
 
+/**
+ * Initializes the count, cell slots, and slot index structures
+ *
+ * @param d_x Array of x coordinates of particles
+ * @param d_y Array of y coordinates of particles
+ * @param d_cellCount Array to hold the count of particles in each cell
+ * @param d_cellSlots Array to hold the slots of particles in each cell
+ * @param d_slotIndex Array to hold the index of each particle in its cell
+ */
 __global__ void buildCellSlots(
     int *d_x, int *d_y, int *d_cellCount,
     int *d_cellSlots, int *d_slotIndex)
@@ -305,11 +314,14 @@ int main(int argc, char **argv)
         infect_kernel<<<blocks, threads>>>(
             d_x, d_y, d_incub, d_susc, d_newInf,
             d_cellCount, d_cellSlots);
+        cudaDeviceSynchronize();
         status_kernel<<<blocks, threads>>>(
             d_x, d_y, d_incub, d_susc, d_newInf, d_cellCount,
             d_cellSlots, d_slotIndex, d_states);
+        cudaDeviceSynchronize();
         move_kernel<<<blocks, threads>>>(
             d_x, d_y, d_cellCount, d_cellSlots, d_slotIndex, d_states);
+        cudaDeviceSynchronize();
 
         if (debug)
         {
@@ -319,7 +331,6 @@ int main(int argc, char **argv)
                        d_x, d_y, d_incub, d_susc,
                        d_cellCount, nullptr);
         }
-        cudaDeviceSynchronize();
     }
 
     // Cleanup
