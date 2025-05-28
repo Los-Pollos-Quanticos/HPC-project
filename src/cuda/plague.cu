@@ -1,7 +1,3 @@
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
-#include <curand_kernel.h>
 #include "../utils/utils_cuda.cuh"
 
 __global__ void init_population_kernel(
@@ -306,7 +302,7 @@ int main(int argc, char **argv)
     if (debug)
         debugState("initial build",
                    d_x, d_y, d_incub, d_susc,
-                   d_cellCount, nullptr);
+                   d_cellCount);
 
     // Main loop
     for (int day = 0; day < ND; ++day)
@@ -329,7 +325,7 @@ int main(int argc, char **argv)
             snprintf(buf, 32, "after day %d", day);
             debugState(buf,
                        d_x, d_y, d_incub, d_susc,
-                       d_cellCount, nullptr);
+                       d_cellCount);
         }
     }
 

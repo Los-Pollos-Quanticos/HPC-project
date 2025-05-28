@@ -87,7 +87,7 @@ void log_memory_usage(const char *label)
 void debugState(const char *phase,
                 int *d_x, int *d_y,
                 int *d_incub, float *d_susc,
-                int *d_cellCount, int *d_cellStart)
+                int *d_cellCount)
 {
     const int P_SAMPLE = NP; // show all persons
     const int G_PATCH = W;   // full grid width in this tiny example
