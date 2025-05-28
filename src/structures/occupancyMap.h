@@ -18,6 +18,5 @@ extern Person **all_persons_pointers;
 void removePerson(Person *p);
 void addPerson(Person *p, int x, int y);
 void movePerson(Person *p, int x, int y);
-void freeOccupancyMap();
 
 #endif

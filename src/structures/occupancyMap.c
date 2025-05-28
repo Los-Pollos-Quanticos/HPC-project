@@ -36,13 +36,3 @@ void movePerson(Person *p, int x, int y)
     removePerson(p);
     addPerson(p, x, y);
 }
-
-void freeOccupancyMap()
-{
-    // long grid_size = (long)W * H;
-    // for (long i = 0; i < grid_size; i++)
-    // {
-    //     free(occupancy_map[i].persons);
-    // }
-    free(occupancy_map);
-}

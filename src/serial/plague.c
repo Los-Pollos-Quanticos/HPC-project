@@ -222,7 +222,7 @@ int main(int argc, char **argv)
     }
 
     free(population);
-    freeOccupancyMap();
+    free(occupancy_map);
     occupancy_map = NULL;
     free(all_persons_pointers);
     all_persons_pointers = NULL;

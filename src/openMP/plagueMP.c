@@ -4,31 +4,68 @@
 #include "../structures/tupleList.h"
 #include "../structures/occupancyMap.h"
 
+#define NTHREADS 6
+#define TOT_CELL (W * H)
 #define LOCK(x, y) cell_locks[x * H + y]
 
-#define NTHREADS 6
-
 Cell *occupancy_map = NULL;
-
 Person **all_persons_pointers = NULL;
+omp_lock_t *cell_locks = NULL;
 
-/*rand() is not guaranteed to be thread-safe.
-POSIX offered a thread-safe version of rand called rand_r,
-which is obsolete in favor of the drand48 family of functions.
-This version uses rand_r.*/
+bool debug = true;
 
+
+/**
+ * @brief Initializes the OpenMP locks for each cell in the grid.
+ * @param None
+ * @return None
+ */
+void init_locks(){
+    cell_locks = malloc((long)TOT_CELL * sizeof(omp_lock_t));
+        if (cell_locks == NULL)
+        {
+            fprintf(stderr, "Failed to allocate cell locks.\n");
+            exit(1);
+        }
+
+        #pragma omp parallel for collapse(2)
+            for (int i = 0; i < W; i++)
+                for (int j = 0; j < H; j++)
+                    omp_init_lock(&LOCK(i,j));
+}
+
+/**
+ * @brief Destroys the OpenMP locks and frees the allocated memory.
+ * @param None
+ * @return None
+ */
+void destroy_locks(){
+    #pragma omp for collapse(2)
+        for (int i = 0; i < W; i++)
+            for (int j = 0; j < H; j++)
+                omp_destroy_lock(&LOCK(i,j));
+
+    free(cell_locks);
+}
+
+
+/**
+ * @brief Initializes the simulation environment and distributes the population.
+ * @param population A pointer to an array of `Person` structures representing the entire population.
+ * @return None
+ */
 void init_population(Person *population)
 {
+    if(debug)
+        printf("------ STARTING INIT POPULATION ------\n");
 
-    double initial_time = omp_get_wtime();
-    printf("------ INIT POPULATION DEBUG ------\n");
     if (NP > W * H * MAXP_CELL)
     {
         printf("Error: Population size exceeds available space on the grid.\n");
         exit(1);
     }
 
-    occupancy_map = malloc((long)W * H * sizeof(Cell));
+    occupancy_map = malloc(W * H * sizeof(Cell));
     if (occupancy_map == NULL)
     {
         fprintf(stderr, "Failed to allocate memory for occupancy map.\n");
@@ -51,48 +88,19 @@ void init_population(Person *population)
         for (int y = 0; y < H; y++)
         {
             AT(x, y).occupancy = 0;
-            //This line sets the person pointer of the (x,y) cell to point to the correct all_person_pointers "index"
-            AT(x, y).persons = &all_persons_pointers[((long)x * H + y) * MAXP_CELL];
-            //We fill MAXP_CELL slots of the persons array with NULL pointers (so of the array of all_persons) 
+            AT(x, y).persons = &all_persons_pointers[(x * H + y) * MAXP_CELL];
             for (int k = 0; k < MAXP_CELL; k++) {
                 AT(x,y).persons[k] = NULL;
             }
         }
     }
 
-    // print #cells #persons and #threads too
-    // printf("Number of cells: %d, Number of persons: %d, Number of threads: %d\n", W * H, NP, NTHREADS);
-    // printf("Number of immune: %d, infected: %d\n", num_immune, num_infected);
+    if(debug){
+        printf("Number of cells: %d, Number of persons: %d, Number of threads: %d\n", W * H, NP, NTHREADS);
+        printf("Number of immune: %d, infected: %d\n", num_immune, num_infected);
+    }
 
-    
-    //PARALLELIZED DEPRECATED VERSION-------------------------------------------
-
-    // #pragma omp parallel for collapse(2)
-    // for (int x = 0; x < W; x++)
-    // {
-    //     for (int y = 0; y < H; y++)
-    //     {
-    //         AT(x, y).occupancy = 0;
-    //         AT(x, y).persons = malloc(MAXP_CELL * sizeof(Person *));
-    //         if (AT(x, y).persons == NULL)
-    //         {
-    //             fprintf(stderr, "Failed to allocate persons array at (%d, %d)\n", x, y);
-    //             exit(1);
-    //         }
-    //     }
-    // }
-    
-
-    //----------------------------------------------------------------------
-
-
-    double final_initial_time = omp_get_wtime();
-    //printf("Time taken to initialize occupancy map: %f seconds\n", final_initial_time - initial_time);
-
-
-    double initial_serial_part_time = omp_get_wtime();
-    int total_cells = W * H;
-
+    // Each thread will have its available coordinates and occupancy count
     int *cells_per_thread = malloc(NTHREADS * sizeof(int));
     int *people_per_thread = malloc(NTHREADS * sizeof(int));
     int *cell_offset = malloc(NTHREADS * sizeof(int));
@@ -100,43 +108,34 @@ void init_population(Person *population)
     int *immune_per_thread = malloc(NTHREADS * sizeof(int));
     int *infected_per_thread = malloc(NTHREADS * sizeof(int));
 
+    // Calculation of the number of cells each thread will handle
     for (int i = 0; i < NTHREADS; ++i)
-        cells_per_thread[i] = total_cells / NTHREADS + (i < total_cells % NTHREADS ? 1 : 0);
+        cells_per_thread[i] = (TOT_CELL) / NTHREADS + (i < (TOT_CELL) % NTHREADS ? 1 : 0);
 
-    // Videocall calculations
     int assigned_people = 0;
     int assigned_immune = 0;
     int assigned_infected = 0;
 
+    // Susceptible, immune, and infected are distributed among 
+    // threads proportionally to the number of cells they handle
     for (int i = 0; i < NTHREADS; i++)
     {
-        // Distribute people
         int max_people = MAXP_CELL * cells_per_thread[i];
-        people_per_thread[i] = (int)(((long)NP * cells_per_thread[i]) / total_cells);
-
-
-        // if (people_per_thread[i] > max_people) // Can it really overcome the max capacity?
-        //     people_per_thread[i] = max_people;
+        people_per_thread[i] = (int)(((long)NP * cells_per_thread[i]) / (TOT_CELL));
         assigned_people += people_per_thread[i];
 
-        // Distribute immune and infected
-        immune_per_thread[i] = (int)(((long)num_immune * cells_per_thread[i]) / total_cells);
-        infected_per_thread[i] = (int)(((long)num_infected * cells_per_thread[i]) / total_cells);
-
-        // if (immune_per_thread[i] > max_people)
-        //     immune_per_thread[i] = max_people;
+        immune_per_thread[i] = (int)(((long)num_immune * cells_per_thread[i]) / (TOT_CELL));
         assigned_immune += immune_per_thread[i];
-
-        // if (infected_per_thread[i] > max_people)
-        //     infected_per_thread[i] = max_people;
+        
+        infected_per_thread[i] = (int)(((long)num_infected * cells_per_thread[i]) / (TOT_CELL));
         assigned_infected += infected_per_thread[i];
     }
 
-    // We have now remaining people to assign, the immune and the infected too
     int remaining_people = NP - assigned_people;
     int remaining_immune = num_immune - assigned_immune;
     int remaining_infected = num_infected - assigned_infected;
 
+    // Remaining people, immune, and infected are distributed starting from the first thread
     for (int i = 0; i < NTHREADS && (remaining_people > 0 || remaining_immune > 0 || remaining_infected > 0); i++)
     {
         int max_people = MAXP_CELL * cells_per_thread[i];
@@ -147,14 +146,12 @@ void init_population(Person *population)
             remaining_people--;
         }
 
-        // Distribute remaining immune
         while (immune_per_thread[i] < people_per_thread[i] && remaining_immune > 0)
         {
             immune_per_thread[i]++;
             remaining_immune--;
         }
 
-        // Distribute remaining infected
         while (infected_per_thread[i] < (people_per_thread[i] - immune_per_thread[i]) && remaining_infected > 0)
         {
             infected_per_thread[i]++;
@@ -162,22 +159,24 @@ void init_population(Person *population)
         }
     }
 
-    // print final arrays
-    // printf("\nFinal cells_per_thread: ");
-    // for (int i = 0; i < NTHREADS; ++i)
-    //     printf("%d ", cells_per_thread[i]);
-    // printf("\nFinal people_per_thread: ");
-    // for (int i = 0; i < NTHREADS; ++i)
-    //     printf("%d ", people_per_thread[i]);
-    // printf("\nFinal immune_per_thread: ");
-    // for (int i = 0; i < NTHREADS; ++i)
-    //     printf("%d ", immune_per_thread[i]);
-    // printf("\nFinal infected_per_thread: ");
-    // for (int i = 0; i < NTHREADS; ++i)
-    //     printf("%d ", infected_per_thread[i]);
-    // printf("\n");
+    if(debug){
+        printf("\nFinal cells_per_thread: ");
+        for (int i = 0; i < NTHREADS; ++i)
+            printf("%d ", cells_per_thread[i]);
+        printf("\nFinal people_per_thread: ");
+        for (int i = 0; i < NTHREADS; ++i)
+            printf("%d ", people_per_thread[i]);
+        printf("\nFinal immune_per_thread: ");
+        for (int i = 0; i < NTHREADS; ++i)
+            printf("%d ", immune_per_thread[i]);
+        printf("\nFinal infected_per_thread: ");
+        for (int i = 0; i < NTHREADS; ++i)
+            printf("%d ", infected_per_thread[i]);
+        printf("\n");
+    }
 
-    // To this point each thread knows how many persons to accomodate
+    // Each thread will work on a specific range of cells and people, given by these offsets.
+    // The first thread starts from person and cell "zero", the others are calculated based on the previous thread's end
     cell_offset[0] = people_offset[0] = 0;
     for (int i = 1; i < NTHREADS; i++)
     {
@@ -185,19 +184,16 @@ void init_population(Person *population)
         people_offset[i] = people_offset[i - 1] + people_per_thread[i - 1];
     }
 
-    // print the offsets arrays
-    // printf("\nFinal cell_offset: ");
-    // for (int i = 0; i < NTHREADS; ++i)
-    //     printf("%d ", cell_offset[i]);
-    // printf("\nFinal people_offset: ");
-    // for (int i = 0; i < NTHREADS; ++i)
-    //     printf("%d ", people_offset[i]);
-    // printf("\n\n");
+    if(debug){
+        printf("\nFinal cell_offset: ");
+        for (int i = 0; i < NTHREADS; ++i)
+            printf("%d ", cell_offset[i]);
+        printf("\nFinal people_offset: ");
+        for (int i = 0; i < NTHREADS; ++i)
+            printf("%d ", people_offset[i]);
+        printf("\n\n");
+    }
 
-    double final_serial_part_time = omp_get_wtime();
-    //printf("Time taken to calculate serial part: %f seconds\n", final_serial_part_time - initial_serial_part_time);
-
-    double initial_parallel_part_time = omp_get_wtime();
     #pragma omp parallel
     {
         int tid = omp_get_thread_num();
@@ -210,6 +206,8 @@ void init_population(Person *population)
         int people_end = people_start + people_per_thread[tid];
 
         TList *local_coords = createTList(cells_per_thread[tid]);
+
+        // Tuple generations for each thread
         for (int i = cell_start; i < cell_end; i++)
         {
             int x = i / H;
@@ -217,22 +215,23 @@ void init_population(Person *population)
             addTuple(local_coords, x, y);
         }
 
-        // each thread print its local coordinates
-        // #pragma omp critical
-        // {
-        //     printf("Thread %d local coordinates: ", tid);
-        //     for (int i = 0; i < local_coords->size; i++)
-        //     {
-        //         printf("(%d, %d) ", local_coords->data[i].x, local_coords->data[i].y);
-        //     }
-        //     printf("\n");
-        // }
+        if(debug && TOT_CELL<=100){
+            #pragma omp critical
+            {
+                printf("Thread %d local coordinates: ", tid);
+                for (int i = 0; i < local_coords->size; i++)
+                {
+                    printf("(%d, %d) ", local_coords->data[i].x, local_coords->data[i].y);
+                }
+                printf("\n");
+            }
 
-        // // DEBUG
-        // #pragma omp barrier
+            #pragma omp barrier
+        }
 
         int person_count = 0;
 
+        // Population distribution and initialization
         for (int i = people_start; i < people_end; i++)
         {
             Person *p = &population[i];
@@ -245,7 +244,6 @@ void init_population(Person *population)
 
             addPerson(p, t.x, t.y);
 
-            // Role assignment
             int role = 2;
             if (person_count < immune_per_thread[tid])
                 role = 0;
@@ -272,15 +270,11 @@ void init_population(Person *population)
             if (AT(t.x, t.y).occupancy == MAXP_CELL)
                 removeTupleAt(local_coords, idx);
 
-            // printf("Thread %d adding person %d with days %d in (%d,%d)\n", tid, i, p->incubation_days, t.x, t.y);
             person_count++;
         }
 
         freeTList(local_coords);
     }
-
-    double final_parallel_part_time = omp_get_wtime();
-    //printf("Time taken to distribute population : %f seconds\n", final_parallel_part_time - initial_parallel_part_time);
 
     free(cells_per_thread);
     free(people_per_thread);
@@ -290,27 +284,15 @@ void init_population(Person *population)
     free(infected_per_thread);
 }
 
-
+/**
+ * @brief Simulates one day of activity for the population.
+ * @param population A pointer to an array of `Person` structures representing the entire population.
+ * @return None
+ */
 void simulate_one_day(Person *population)
 {
-    double init_locks_time = omp_get_wtime();
     int max_num_new_infected = NP - (int)(NP * IMM);
 
-    omp_lock_t *cell_locks = malloc(W * H * sizeof(omp_lock_t));
-    if (cell_locks == NULL)
-    {
-        fprintf(stderr, "Failed to allocate cell locks.\n");
-        exit(1);
-    }
-
-    #pragma omp parallel for collapse(2)
-    for (int i = 0; i < W; i++)
-        for (int j = 0; j < H; j++)
-            omp_init_lock(&LOCK(i,j));
-    double final_locks_time = omp_get_wtime();
-    //printf("Time taken to initialize locks: %f seconds\n", final_locks_time - init_locks_time);
-
-    double init_simulation_time = omp_get_wtime();
     #pragma omp parallel
     {
         unsigned int seed = (unsigned int)(time(NULL) ^ omp_get_thread_num());
@@ -339,8 +321,10 @@ void simulate_one_day(Person *population)
                         if (nx < 0 || nx >= W || ny < 0 || ny >= H)
                             continue;
 
+                        // Acquire a lock for the neighbor's cell to prevent race conditions during access.
                         omp_set_lock(&LOCK(nx, ny));
 
+                        // For each neighbo, check if it is susceptible
                         for (int j = 0; j < AT(nx, ny).occupancy; j++)
                         {
                             Person *neighbor = AT(nx, ny).persons[j];
@@ -350,6 +334,7 @@ void simulate_one_day(Person *population)
                                 if (infectivity > ITH)
                                 {
                                     neighbor->new_infected = true;
+                                    // Newly infected persons are stored in a local array for later processing
                                     local_newly_infected[local_newly_count++] = neighbor;
                                 }
                             }
@@ -373,6 +358,7 @@ void simulate_one_day(Person *population)
                 int x1 = p->x, y1 = p->y;
                 int x2 = new_x, y2 = new_y;
 
+                // The locks are acquired and left in a consistent order to prevent deadlocks.
                 bool lock_current_first = (x1 < x2) || (x1 == x2 && y1 < y2);
 
                 if (lock_current_first)
@@ -429,17 +415,7 @@ void simulate_one_day(Person *population)
             }
         }
 
-        double final_simulation_time = omp_get_wtime();
-        //printf("Time taken to simulate day: %f seconds\n", final_simulation_time - init_simulation_time);
-
-        double init_destroy_locks_time = omp_get_wtime();
-        #pragma omp for collapse(2)
-        for (int i = 0; i < W; i++)
-            for (int j = 0; j < H; j++)
-                omp_destroy_lock(&LOCK(i,j));
-        double final_destroy_locks_time = omp_get_wtime();
-        //printf("Time taken to destroy locks: %f seconds\n", final_destroy_locks_time - init_destroy_locks_time);
-
+        // Process the newly infected persons, which can infect others on the next day.
         for (int i = 0; i < local_newly_count; i++)
         {
             Person *p = local_newly_infected[i];
@@ -449,45 +425,51 @@ void simulate_one_day(Person *population)
 
         free(local_newly_infected);
     }
-
-    free(cell_locks);
 }
 
 
-int main()
+int main(int argc, char **argv)
 {
+    for (int i = 1; i < argc; ++i)
+        if (!strcmp(argv[i], "--debug"))
+            debug = true;
+            
+    struct timespec start, end;
+    clock_gettime(CLOCK_MONOTONIC, &start);
+
     omp_set_num_threads(NTHREADS);
 
     Person *population = (Person *)malloc(NP * sizeof(Person));
-
+    
     if (population == NULL)
     {
         fprintf(stderr, "Memory allocation failed\n");
         return 1;
     }
+
     srand(time(NULL));
 
-    double start_time = omp_get_wtime();
     init_population(population);
-    double init_pop_end_time = omp_get_wtime();
 
-    // simulation
-    double simulate_day_time = omp_get_wtime();
+    init_locks();
+
     for (int day = 0; day < ND; day++)
     {
-        save_population(population, day);
-        printf("------- DAY %d DEBUG --------\n", day);
+        if(debug){
+            save_population(population, day);
+            printf("------- DAY %d DEBUG --------\n", day);
+        }
         simulate_one_day(population);
     }
 
-    double end_time = omp_get_wtime();
-    printf("Simulation completed in %f seconds\n", end_time - start_time);
-    printf("Days simulated in %f seconds\n", end_time - simulate_day_time);
-    printf("Population initialized in %f seconds\n", init_pop_end_time - start_time);
+    destroy_locks();
 
     free(population);
-    freeOccupancyMap();
+    free(occupancy_map);
     occupancy_map = NULL;
     free(all_persons_pointers);
     all_persons_pointers = NULL;
+
+    clock_gettime(CLOCK_MONOTONIC, &end);
+    printf("RunTime: %ld ms\n", get_time_in_ms(start, end));
 }

@@ -27,7 +27,7 @@ extern "C"
 #endif
 
 #ifndef NP
-#define NP (int)(W * H * MAXP_CELL * 0.1) // Total number of people in the simulation
+#define NP (int)(W * H * MAXP_CELL * 0.9) // Total number of people in the simulation
 #endif
 
 #ifndef INFP
