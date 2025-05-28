@@ -29,4 +29,5 @@ typedef struct
 } PersonReport;
 
 void save_population(Person *population, int day);
+long get_time_in_ms(struct timespec start, struct timespec end);
 #endif

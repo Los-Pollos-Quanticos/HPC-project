@@ -21,6 +21,11 @@ float gaussian_random(unsigned int seed, float mean, float stddev)
     return s;
 }
 
+long get_time_in_ms(struct timespec start, struct timespec end)
+{
+    return (end.tv_sec - start.tv_sec) * 1000 + (end.tv_nsec - start.tv_nsec) / 1000000;
+}
+
 bool is_dead(const Person *p)
 {
     return p->x < 0 && p->y < 0;
