@@ -12,9 +12,6 @@ Cell *occupancy_map = NULL;
 Person **all_persons_pointers = NULL;
 omp_lock_t *cell_locks = NULL;
 
-bool debug = true;
-
-
 /**
  * @brief Initializes the OpenMP locks for each cell in the grid.
  * @param None
