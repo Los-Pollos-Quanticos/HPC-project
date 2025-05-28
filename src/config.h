@@ -14,19 +14,57 @@ extern "C"
 #include <string.h>
 
 // Constants for simulation parameters
-#define W 3                               // Width of the grid
-#define H 3                               // Height of the grid
-#define MAXP_CELL 3                       // Maximum number of people in a cell
+#ifndef W
+#define W 3 // Width of the grid
+#endif
+
+#ifndef H
+#define H 3 // Height of the grid
+#endif
+
+#ifndef MAXP_CELL
+#define MAXP_CELL 3 // Maximum number of people in a cell
+#endif
+
+#ifndef NP
 #define NP (int)(W * H * MAXP_CELL * 0.1) // Total number of people in the simulation
-#define INFP 0.5f                         // Initial percentage of infected persons
-#define IMM 0.1f                          // Initial percentage of immune persons
-#define S_AVG 0.5f                        // Susceptibility average
-#define ND 20                             // Number of days in simulation
-#define INCUBATION_DAYS 4                 // Incubation period in days
-#define BETA 0.8f                         // Contagiousness factor
-#define ITH 0.2f                          // Infection threshold
-#define IRD 1                             // Infection radius (in cells)
-#define MU 0.6f                           // Probability of recovery after infection
+#endif
+
+#ifndef INFP
+#define INFP 0.5f // Initial percentage of infected persons
+#endif
+
+#ifndef IMM
+#define IMM 0.1f // Initial percentage of immune persons
+#endif
+
+#ifndef S_AVG
+#define S_AVG 0.5f // Susceptibility average
+#endif
+
+#ifndef ND
+#define ND 20 // Number of days in simulation
+#endif
+
+#ifndef INCUBATION_DAYS
+#define INCUBATION_DAYS 4 // Incubation period in days
+#endif
+
+#ifndef BETA
+#define BETA 0.8f // Contagiousness factor
+#endif
+
+#ifndef ITH
+#define ITH 0.2f // Infection threshold
+#endif
+
+#ifndef IRD
+#define IRD 1 // Infection radius (in cells)
+#endif
+
+#ifndef MU
+#define MU 0.6f // Probability of recovery after infection
+#endif
 
 #define PI 3.14159265358979323846
 
