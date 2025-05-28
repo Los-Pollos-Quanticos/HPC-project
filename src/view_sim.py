@@ -17,9 +17,12 @@ PERSON_STRUCT_FORMAT = "iii"  # x, y, state as ints
 INT_SIZE = struct.calcsize("i")
 PERSON_SIZE = struct.calcsize(PERSON_STRUCT_FORMAT)
 
-GRID_WIDTH = 20
-GRID_HEIGHT = 20
 CELL_PADDING = 0.1  # spacing inside cell for multiple people
+
+# ─────────────── Simulation constants ───────────────
+W            = 3             # grid width
+H            = 3             # grid height
+# ─────────────────────────────────────────────────────
 
 def load_day_data(day):
     filename = os.path.join(DATA_FOLDER, f"day_{day:03d}.dat")
@@ -70,10 +73,10 @@ def plot_population(people, day, ax):
                 markersize=10, markeredgewidth=2)
 
     # Set grid
-    ax.set_xlim(-3, GRID_WIDTH + 1)
-    ax.set_ylim(-1, GRID_HEIGHT + 2)
-    ax.set_xticks(range(GRID_WIDTH))
-    ax.set_yticks(range(GRID_HEIGHT))
+    ax.set_xlim(-3, W + 1)
+    ax.set_ylim(-1, H + 2)
+    ax.set_xticks(range(W))
+    ax.set_yticks(range(H))
     ax.grid(True, which='both', color='black', linewidth=0.5)
 
     # Legend text moved further to the right
@@ -83,7 +86,7 @@ def plot_population(people, day, ax):
         f"Immune:      {state_counts[0]}\n"
         f"Dead:        {state_counts[3]}"
     )
-    ax.text(GRID_WIDTH + 1.5, GRID_HEIGHT + 1, legend_text,
+    ax.text(W + 1.5, H + 1, legend_text,
             va='top', ha='left', fontsize=10)
 
     ax.figure.canvas.draw()

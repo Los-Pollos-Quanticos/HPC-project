@@ -11,6 +11,20 @@
 #include "../config.h"
 #include "../structures/tupleList.h"
 
+typedef enum
+{
+    IMMUNE = 0,
+    INFECTED = 1,
+    SUSCEPTIBLE = 2,
+    DEAD = 3
+} State;
+
+typedef struct
+{
+    int x, y;
+    State state;
+} PersonReport;
+
 /**
  * @brief Initializes the curand states for random number generation on the GPU.
  *
@@ -64,3 +78,18 @@ void debugState(const char *phase,
                 int *d_x, int *d_y,
                 int *d_incub, float *d_susc,
                 int *d_cellCount);
+
+/**
+ * @brief Copies device arrays back to host and writes reports
+ *
+ * @param d_x      device array of x coords (int[NP])
+ * @param d_y      device array of y coords (int[NP])
+ * @param d_incub  device array of incubation days (int[NP])
+ * @param d_susc   device array of susceptibility (float[NP])
+ * @param day      file index (0..ND-1)
+ */
+void save_population(const int *d_x,
+                     const int *d_y,
+                     const int *d_incub,
+                     const float *d_susc,
+                     int day);

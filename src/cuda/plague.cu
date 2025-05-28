@@ -307,6 +307,11 @@ int main(int argc, char **argv)
     // Main loop
     for (int day = 0; day < ND; ++day)
     {
+        if (debug)
+        {
+            save_population(d_x, d_y, d_incub, d_susc, day);
+        }
+
         infect_kernel<<<blocks, threads>>>(
             d_x, d_y, d_incub, d_susc, d_newInf,
             d_cellCount, d_cellSlots);

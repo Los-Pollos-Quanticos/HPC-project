@@ -158,3 +158,70 @@ void debugState(const char *phase,
 
     printf("============================\n\n");
 }
+
+void save_population(
+    const int *d_x,
+    const int *d_y,
+    const int *d_incub,
+    const float *d_susc,
+    int day)
+{
+    int *h_x = (int *)malloc(NP * sizeof(int));
+    int *h_y = (int *)malloc(NP * sizeof(int));
+    int *h_incub = (int *)malloc(NP * sizeof(int));
+    float *h_susc = (float *)malloc(NP * sizeof(float));
+
+    if (!h_x || !h_y || !h_incub || !h_susc)
+    {
+        fprintf(stderr, "utils_cuda: malloc failed in save_population_cuda\n");
+        free(h_x);
+        free(h_y);
+        free(h_incub);
+        free(h_susc);
+    }
+
+    cudaMemcpy(h_x, d_x, NP * sizeof(int), cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_y, d_y, NP * sizeof(int), cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_incub, d_incub, NP * sizeof(int), cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_susc, d_susc, NP * sizeof(float), cudaMemcpyDeviceToHost);
+
+    char filename[64];
+    snprintf(filename, sizeof(filename), "./report/day_%03d.dat", day);
+    FILE *f = fopen(filename, "wb");
+    if (!f)
+    {
+        fprintf(stderr, "utils_cuda: failed to open %s for writing\n", filename);
+        free(h_x);
+        free(h_y);
+        free(h_incub);
+        free(h_susc);
+    }
+
+    int np_val = NP;
+    fwrite(&np_val, sizeof(int), 1, f);
+
+    for (int i = 0; i < NP; ++i)
+    {
+        int state;
+        if (h_x[i] < 0 || h_y[i] < 0)
+            state = DEAD;
+        else if (h_susc[i] == 0.0f)
+            state = IMMUNE;
+        else if (h_incub[i] > 0)
+            state = INFECTED;
+        else
+            state = SUSCEPTIBLE;
+
+        PersonReport pr;
+        pr.x = h_x[i];
+        pr.y = h_y[i];
+        pr.state = (State)state;
+        fwrite(&pr, sizeof(PersonReport), 1, f);
+    }
+    fclose(f);
+
+    free(h_x);
+    free(h_y);
+    free(h_incub);
+    free(h_susc);
+}
