@@ -11,24 +11,26 @@
 Cell *occupancy_map = NULL;
 Person **all_persons_pointers = NULL;
 omp_lock_t *cell_locks = NULL;
+bool debug = false;
 
 /**
  * @brief Initializes the OpenMP locks for each cell in the grid.
  * @param None
  * @return None
  */
-void init_locks(){
+void init_locks()
+{
     cell_locks = malloc((long)TOT_CELL * sizeof(omp_lock_t));
-        if (cell_locks == NULL)
-        {
-            fprintf(stderr, "Failed to allocate cell locks.\n");
-            exit(1);
-        }
+    if (cell_locks == NULL)
+    {
+        fprintf(stderr, "Failed to allocate cell locks.\n");
+        exit(1);
+    }
 
-        #pragma omp parallel for collapse(2)
-            for (int i = 0; i < W; i++)
-                for (int j = 0; j < H; j++)
-                    omp_init_lock(&LOCK(i,j));
+#pragma omp parallel for collapse(2)
+    for (int i = 0; i < W; i++)
+        for (int j = 0; j < H; j++)
+            omp_init_lock(&LOCK(i, j));
 }
 
 /**
@@ -36,15 +38,15 @@ void init_locks(){
  * @param None
  * @return None
  */
-void destroy_locks(){
-    #pragma omp for collapse(2)
-        for (int i = 0; i < W; i++)
-            for (int j = 0; j < H; j++)
-                omp_destroy_lock(&LOCK(i,j));
+void destroy_locks()
+{
+#pragma omp for collapse(2)
+    for (int i = 0; i < W; i++)
+        for (int j = 0; j < H; j++)
+            omp_destroy_lock(&LOCK(i, j));
 
     free(cell_locks);
 }
-
 
 /**
  * @brief Initializes the simulation environment and distributes the population.
@@ -53,7 +55,7 @@ void destroy_locks(){
  */
 void init_population(Person *population)
 {
-    if(debug)
+    if (debug)
         printf("------ STARTING INIT POPULATION ------\n");
 
     if (NP > W * H * MAXP_CELL)
@@ -69,7 +71,7 @@ void init_population(Person *population)
         exit(1);
     }
 
-    all_persons_pointers = (Person**)malloc((long)W * H * MAXP_CELL * sizeof(Person *));
+    all_persons_pointers = (Person **)malloc((long)W * H * MAXP_CELL * sizeof(Person *));
     if (all_persons_pointers == NULL)
     {
         fprintf(stderr, "Failed to allocate global persons pointers array.\n");
@@ -79,20 +81,22 @@ void init_population(Person *population)
     int num_immune = (int)(NP * IMM);
     int num_infected = (int)(NP * INFP);
 
-    #pragma omp parallel for collapse(2)
+#pragma omp parallel for collapse(2)
     for (int x = 0; x < W; x++)
     {
         for (int y = 0; y < H; y++)
         {
             AT(x, y).occupancy = 0;
             AT(x, y).persons = &all_persons_pointers[(x * H + y) * MAXP_CELL];
-            for (int k = 0; k < MAXP_CELL; k++) {
-                AT(x,y).persons[k] = NULL;
+            for (int k = 0; k < MAXP_CELL; k++)
+            {
+                AT(x, y).persons[k] = NULL;
             }
         }
     }
 
-    if(debug){
+    if (debug)
+    {
         printf("Number of cells: %d, Number of persons: %d, Number of threads: %d\n", W * H, NP, NTHREADS);
         printf("Number of immune: %d, infected: %d\n", num_immune, num_infected);
     }
@@ -113,7 +117,7 @@ void init_population(Person *population)
     int assigned_immune = 0;
     int assigned_infected = 0;
 
-    // Susceptible, immune, and infected are distributed among 
+    // Susceptible, immune, and infected are distributed among
     // threads proportionally to the number of cells they handle
     for (int i = 0; i < NTHREADS; i++)
     {
@@ -123,7 +127,7 @@ void init_population(Person *population)
 
         immune_per_thread[i] = (int)(((long)num_immune * cells_per_thread[i]) / (TOT_CELL));
         assigned_immune += immune_per_thread[i];
-        
+
         infected_per_thread[i] = (int)(((long)num_infected * cells_per_thread[i]) / (TOT_CELL));
         assigned_infected += infected_per_thread[i];
     }
@@ -156,7 +160,8 @@ void init_population(Person *population)
         }
     }
 
-    if(debug){
+    if (debug)
+    {
         printf("\nFinal cells_per_thread: ");
         for (int i = 0; i < NTHREADS; ++i)
             printf("%d ", cells_per_thread[i]);
@@ -181,7 +186,8 @@ void init_population(Person *population)
         people_offset[i] = people_offset[i - 1] + people_per_thread[i - 1];
     }
 
-    if(debug){
+    if (debug)
+    {
         printf("\nFinal cell_offset: ");
         for (int i = 0; i < NTHREADS; ++i)
             printf("%d ", cell_offset[i]);
@@ -191,7 +197,7 @@ void init_population(Person *population)
         printf("\n\n");
     }
 
-    #pragma omp parallel
+#pragma omp parallel
     {
         int tid = omp_get_thread_num();
         unsigned int seed = (unsigned int)(time(NULL) ^ tid);
@@ -212,8 +218,9 @@ void init_population(Person *population)
             addTuple(local_coords, x, y);
         }
 
-        if(debug && TOT_CELL<=100){
-            #pragma omp critical
+        if (debug && TOT_CELL <= 100)
+        {
+#pragma omp critical
             {
                 printf("Thread %d local coordinates: ", tid);
                 for (int i = 0; i < local_coords->size; i++)
@@ -223,7 +230,7 @@ void init_population(Person *population)
                 printf("\n");
             }
 
-            #pragma omp barrier
+#pragma omp barrier
         }
 
         int person_count = 0;
@@ -290,13 +297,13 @@ void simulate_one_day(Person *population)
 {
     int max_num_new_infected = NP - (int)(NP * IMM);
 
-    #pragma omp parallel
+#pragma omp parallel
     {
         unsigned int seed = (unsigned int)(time(NULL) ^ omp_get_thread_num());
         Person **local_newly_infected = malloc(sizeof(Person *) * max_num_new_infected);
         int local_newly_count = 0;
 
-        #pragma omp for schedule(guided)
+#pragma omp for schedule(guided)
         for (int i = 0; i < NP; i++)
         {
             Person *p = &population[i];
@@ -424,20 +431,19 @@ void simulate_one_day(Person *population)
     }
 }
 
-
 int main(int argc, char **argv)
 {
     for (int i = 1; i < argc; ++i)
         if (!strcmp(argv[i], "--debug"))
             debug = true;
-            
+
     struct timespec start, end;
     clock_gettime(CLOCK_MONOTONIC, &start);
 
     omp_set_num_threads(NTHREADS);
 
     Person *population = (Person *)malloc(NP * sizeof(Person));
-    
+
     if (population == NULL)
     {
         fprintf(stderr, "Memory allocation failed\n");
@@ -452,7 +458,8 @@ int main(int argc, char **argv)
 
     for (int day = 0; day < ND; day++)
     {
-        if(debug){
+        if (debug)
+        {
             save_population(population, day);
             printf("------- DAY %d DEBUG --------\n", day);
         }
