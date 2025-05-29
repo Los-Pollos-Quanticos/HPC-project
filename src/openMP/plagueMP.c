@@ -40,7 +40,7 @@ void init_locks()
  */
 void destroy_locks()
 {
-#pragma omp for collapse(2)
+#pragma omp parallel for collapse(2)
     for (int i = 0; i < W; i++)
         for (int j = 0; j < H; j++)
             omp_destroy_lock(&LOCK(i, j));
