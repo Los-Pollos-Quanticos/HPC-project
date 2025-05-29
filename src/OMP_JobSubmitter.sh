@@ -24,7 +24,7 @@ RESULT_DIR="test_omp/results_W${W}_H${H}_NP${NP}"
 mkdir -p "${RESULT_DIR}"
 
 echo "Building OMP with W=$W, H=$H, MAXP_CELL=$MAXP_CELL, NP=$NP"
-gcc -o ./bin/plagueMP \
+gcc -fopenmp -o ./bin/plagueMP \
     ./openMP/plagueMP.c ./utils/utils.c \
     ./structures/tupleList.c ./structures/occupancyMap.c \
     -DW=${W} -DH=${H} -DMAXP_CELL=${MAXP_CELL} -DNP=${NP} \
