@@ -35,7 +35,7 @@ rm ./report/*
 echo
 for i in $(seq 1 $RUNS); do
     echo "Run #$i → ${RESULT_DIR}/run${i}.out"
-    ./bin/plague --debug > "${RESULT_DIR}/run${i}.out" 2>&1
+    ./bin/plagueMP --debug > "${RESULT_DIR}/run${i}.out" 2>&1
 done
 
 # clean up if you like
