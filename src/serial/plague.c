@@ -56,10 +56,10 @@ void init_population(Person *population)
 
     for (i = 0; i < NP; i++)
     {
+        unsigned int seed = (unsigned int)rand();
         Person *p = &population[i];
         Tuple t;
-        unsigned int seed = (unsigned int)time(NULL);
-        int idx = getRandomTupleIndex(seed, available_coords, &t);
+        int idx = getRandomTupleIndexSerial(available_coords, &t);
 
         p->x = t.x;
         p->y = t.y;
