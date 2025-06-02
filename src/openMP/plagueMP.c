@@ -27,7 +27,7 @@ void init_locks()
         exit(1);
     }
 
-#pragma omp parallel for collapse(2)
+    #pragma omp parallel for collapse(2)
     for (int i = 0; i < W; i++)
         for (int j = 0; j < H; j++)
             omp_init_lock(&LOCK(i, j));
@@ -40,7 +40,7 @@ void init_locks()
  */
 void destroy_locks()
 {
-#pragma omp parallel for collapse(2)
+    #pragma omp parallel for collapse(2)
     for (int i = 0; i < W; i++)
         for (int j = 0; j < H; j++)
             omp_destroy_lock(&LOCK(i, j));
@@ -81,7 +81,7 @@ void init_population(Person *population)
     int num_immune = (int)(NP * IMM);
     int num_infected = (int)(NP * INFP);
 
-#pragma omp parallel for collapse(2)
+    #pragma omp parallel for collapse(2)
     for (int x = 0; x < W; x++)
     {
         for (int y = 0; y < H; y++)
@@ -197,10 +197,11 @@ void init_population(Person *population)
         printf("\n\n");
     }
 
-#pragma omp parallel
+    #pragma omp parallel
     {
         int tid = omp_get_thread_num();
-        unsigned int seed = (unsigned int)(time(NULL) ^ tid);
+        // Each thread will have its own seed for random number generation
+        unsigned int seed;
 
         int cell_start = cell_offset[tid];
         int cell_end = cell_start + cells_per_thread[tid];
@@ -220,7 +221,7 @@ void init_population(Person *population)
 
         if (debug && TOT_CELL <= 100)
         {
-#pragma omp critical
+            #pragma omp critical
             {
                 printf("Thread %d local coordinates: ", tid);
                 for (int i = 0; i < local_coords->size; i++)
@@ -230,7 +231,7 @@ void init_population(Person *population)
                 printf("\n");
             }
 
-#pragma omp barrier
+            #pragma omp barrier
         }
 
         int person_count = 0;
@@ -241,7 +242,13 @@ void init_population(Person *population)
             Person *p = &population[i];
             Tuple t;
 
+            seed = (unsigned int)(time(NULL) ^ i);
             int idx = getRandomTupleIndex(seed, local_coords, &t);
+
+            if(debug)
+            {
+               printf("Thread %d: Person %d at (%d, %d) with idx %d\n", tid, i, t.x, t.y, idx);
+            }
 
             p->x = t.x;
             p->y = t.y;
@@ -254,6 +261,7 @@ void init_population(Person *population)
             else if (person_count < immune_per_thread[tid] + infected_per_thread[tid])
                 role = 1;
 
+            seed = (unsigned int)(time(NULL) ^ i);
             if (role == 0)
             {
                 p->susceptibility = 0.0f;
@@ -297,13 +305,16 @@ void simulate_one_day(Person *population)
 {
     int max_num_new_infected = NP - (int)(NP * IMM);
 
-#pragma omp parallel
+    #pragma omp parallel
     {
-        unsigned int seed = (unsigned int)(time(NULL) ^ omp_get_thread_num());
+        // Again, each thread will have its own seed for random number generation
+        int tid = omp_get_thread_num();
+        unsigned int seed;
+
         Person **local_newly_infected = malloc(sizeof(Person *) * max_num_new_infected);
         int local_newly_count = 0;
 
-#pragma omp for schedule(guided)
+        #pragma omp for schedule(guided)
         for (int i = 0; i < NP; i++)
         {
             Person *p = &population[i];
@@ -328,7 +339,7 @@ void simulate_one_day(Person *population)
                         // Acquire a lock for the neighbor's cell to prevent race conditions during access.
                         omp_set_lock(&LOCK(nx, ny));
 
-                        // For each neighbo, check if it is susceptible
+                        // For each neighbor, check if it is susceptible
                         for (int j = 0; j < AT(nx, ny).occupancy; j++)
                         {
                             Person *neighbor = AT(nx, ny).persons[j];
@@ -349,6 +360,7 @@ void simulate_one_day(Person *population)
                 }
             }
 
+            seed = (unsigned int)(time(NULL) ^ tid);
             int dx = (rand_r(&seed) % 3) - 1;
             int dy = (rand_r(&seed) % 3) - 1;
             int new_x = p->x + dx;
@@ -399,6 +411,7 @@ void simulate_one_day(Person *population)
 
             if (p->incubation_days == 1)
             {
+                seed = (unsigned int)(time(NULL) ^ tid);
                 float prob = (float)rand_r(&seed) / RAND_MAX;
 
                 if (prob < MU)
@@ -453,6 +466,17 @@ int main(int argc, char **argv)
     srand(time(NULL));
 
     init_population(population);
+
+    //Verify that susceptibility is a gaussian distribution
+    if (debug)
+    {
+        printf("Susceptibility distribution:\n");
+        for (int i = 0; i < NP; i++)
+        {
+            Person *p = &population[i];
+            printf("Person %d: susceptibility = %.2f\n", i, p->susceptibility);
+        }
+    }
 
     init_locks();
 

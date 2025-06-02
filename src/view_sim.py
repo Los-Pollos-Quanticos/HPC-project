@@ -20,8 +20,8 @@ PERSON_SIZE = struct.calcsize(PERSON_STRUCT_FORMAT)
 CELL_PADDING = 0.1  # spacing inside cell for multiple people
 
 # ─────────────── Simulation constants ───────────────
-W            = 3             # grid width
-H            = 3             # grid height
+W            = 10             # grid width
+H            = 10             # grid height
 # ─────────────────────────────────────────────────────
 
 def load_day_data(day):

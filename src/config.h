@@ -15,11 +15,11 @@ extern "C"
 
 // Constants for simulation parameters
 #ifndef W
-#define W 3 // Width of the grid
+#define W 15 // Width of the grid
 #endif
 
 #ifndef H
-#define H 3 // Height of the grid
+#define H 15 // Height of the grid
 #endif
 
 #ifndef MAXP_CELL
@@ -27,7 +27,7 @@ extern "C"
 #endif
 
 #ifndef NP
-#define NP (int)(W * H * MAXP_CELL * 0.9) // Total number of people in the simulation
+#define NP (int)(W * H * MAXP_CELL * 0.5) // Total number of people in the simulation
 #endif
 
 #ifndef INFP

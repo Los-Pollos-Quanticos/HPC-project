@@ -3,10 +3,10 @@ import struct
 import unittest
 
 # ─────────────── Simulation constants ───────────────
-W            = 3             # grid width
-H            = 3             # grid height
+W            = 15             # grid width
+H            = 15             # grid height
 MAXP_CELL    = 3             # max people per cell
-NP           = int(W * H * MAXP_CELL * 0.9)  # total people
+NP           = int(W * H * MAXP_CELL * 0.5)  # total people
 INFP         = 0.5           # initial infected fraction
 IMM          = 0.1           # initial immune fraction
 ND           = 20            # number of days

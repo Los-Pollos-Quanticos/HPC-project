@@ -12,5 +12,5 @@ gcc -fopenmp -o ./bin/plagueMP ./openMP/plagueMP.c ./utils/utils.c ./structures/
 
 # Step 2: Run the compiled executable
 echo "Running ./plagueMP..."
-./bin/plagueMP
+./bin/plagueMP --debug
 

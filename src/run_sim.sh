@@ -12,7 +12,7 @@ gcc -o ./bin/plague ./serial/plague.c ./utils/utils.c ./structures/tupleList.c .
 
 # Step 2: Run the compiled executable
 echo "Running ./plague..."
-./bin/plague
+./bin/plague --debug
 
 # Step 3: Run the Python viewer
 # echo "Launching Python viewer..."
