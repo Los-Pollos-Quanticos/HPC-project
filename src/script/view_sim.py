@@ -20,8 +20,8 @@ PERSON_SIZE = struct.calcsize(PERSON_STRUCT_FORMAT)
 CELL_PADDING = 0.1  # spacing inside cell for multiple people
 
 # ─────────────── Simulation constants ───────────────
-W            = 10             # grid width
-H            = 10             # grid height
+W            = 30             # grid width
+H            = 30             # grid height
 # ─────────────────────────────────────────────────────
 
 def load_day_data(day):
@@ -65,21 +65,18 @@ def plot_population(people, day, ax):
                     color=STATE_COLORS.get(state, 'gray'),
                     markersize=8)
 
-    # Plot DEAD people at x = -1.5
     for i, (x, y, state) in enumerate(dead_people):
         offset_y = i * 0.5
         ax.plot(-1.5, offset_y, 'x',
                 color=STATE_COLORS.get(state, 'gray'),
                 markersize=10, markeredgewidth=2)
 
-    # Set grid
     ax.set_xlim(-3, W + 1)
     ax.set_ylim(-1, H + 2)
     ax.set_xticks(range(W))
     ax.set_yticks(range(H))
     ax.grid(True, which='both', color='black', linewidth=0.5)
 
-    # Legend text moved further to the right
     legend_text = (
         f"Susceptible: {state_counts[2]}\n"
         f"Infected:    {state_counts[1]}\n"
@@ -100,12 +97,10 @@ class Viewer:
         self.people = load_day_data(self.day)
         plot_population(self.people, self.day, self.ax)
 
-        # Prev Button
         axprev = plt.axes([0.1, 0.05, 0.15, 0.075])
         self.bprev = Button(axprev, 'Previous')
         self.bprev.on_clicked(self.prev_day)
 
-        # Next Button
         axnext = plt.axes([0.3, 0.05, 0.15, 0.075])
         self.bnext = Button(axnext, 'Next')
         self.bnext.on_clicked(self.next_day)
@@ -129,5 +124,4 @@ class Viewer:
         else:
             self.day -= 1  # Roll back if no data
 
-# Run viewer
 Viewer()
