@@ -13,6 +13,7 @@ bool is_dead(const Person *p);
 bool is_immune(const Person *p);
 bool is_infected(const Person *p);
 bool is_newly_infected(const Person *p);
+bool is_newly_recovered(const Person *p);
 
 typedef enum
 {

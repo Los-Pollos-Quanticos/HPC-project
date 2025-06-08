@@ -76,8 +76,6 @@ void init_population(Person *population)
             p->susceptibility = gaussian_random(seed, S_AVG, 0.1f);
         }
 
-        p->new_infected = false;
-
         if (AT(t.x, t.y).occupancy == MAXP_CELL)
         {
             removeTupleAt(available_coords, idx);
@@ -89,8 +87,8 @@ void init_population(Person *population)
 
 void simulate_one_day(Person *population)
 {
-    int max_num_new_infected = NP - (int)(NP * IMM);
-    Person **newly_infected = malloc(sizeof(Person *) * max_num_new_infected);
+    int max_num_new_status = NP - (int)(NP * IMM);
+    Person **newly_changed = malloc(sizeof(Person *) * max_num_new_status);
     int newly_count = 0;
 
     for (int i = 0; i < NP; i++)
@@ -118,13 +116,17 @@ void simulate_one_day(Person *population)
                     for (int j = 0; j < cell->occupancy; j++)
                     {
                         Person *neighbor = cell->persons[j];
-                        if (!is_infected(neighbor) && !is_immune(neighbor) && !neighbor->new_infected)
+                        if (!is_infected(neighbor) && !is_immune(neighbor) && !is_newly_infected(neighbor) && !is_newly_recovered(neighbor))
+                        
+                            // Calculate infectivity based on susceptibility
+                            // If the infectivity exceeds the threshold, mark as newly infected
+                            // BETA is the contagion factor, ITH is the infection threshold
                         {
                             float infectivity = BETA * neighbor->susceptibility;
                             if (infectivity > ITH)
                             {
-                                neighbor->new_infected = true;
-                                newly_infected[newly_count++] = neighbor;
+                                neighbor->incubation_days = -1; // mark as newly infected
+                                newly_changed[newly_count++] = neighbor;
                             }
                         }
                     }
@@ -161,8 +163,9 @@ void simulate_one_day(Person *population)
             float prob = (float)rand() / RAND_MAX;
             if (prob < MU)
             {
-                // recover
-                p->incubation_days = 0;
+                // mark as newly recovered
+                p->incubation_days = -2;
+                newly_changed[newly_count++] = p;
 
                 if (rand() % 2 == 0)
                 {
@@ -183,11 +186,17 @@ void simulate_one_day(Person *population)
 
     for (int i = 0; i < newly_count; i++)
     {
-        Person *p = newly_infected[i];
-        p->new_infected = false;
-        p->incubation_days = INCUBATION_DAYS + 1;
+        Person *p = newly_changed[i];
+        if (is_newly_infected(p))
+        {
+            p->incubation_days = INCUBATION_DAYS + 1;
+        }
+        else
+        {
+            p->incubation_days = 0;
+        }
     }
-    free(newly_infected);
+    free(newly_changed);
 }
 
 int main(int argc, char **argv)

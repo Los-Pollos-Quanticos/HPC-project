@@ -43,7 +43,12 @@ bool is_infected(const Person *p)
 
 bool is_newly_infected(const Person *p)
 {
-    return p->new_infected;
+    return p->incubation_days==-1;
+}
+
+bool is_newly_recovered(const Person *p)
+{
+    return p->incubation_days == -2;
 }
 
 void save_population(Person *population, int day)

@@ -74,7 +74,6 @@ extern "C"
         int x, y;             // Position in the grid, if x < 0 or y < 0, the person is dead
         float susceptibility; // From 0 to 1, if 0 = immune otherwise susceptible
         int incubation_days;  // is 0 if not infected, > 0 if infected
-        bool new_infected;    // is true if the person was infected within day D
     } Person;
 
 #ifdef __cplusplus
