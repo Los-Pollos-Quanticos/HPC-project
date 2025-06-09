@@ -10,7 +10,9 @@
 
 Cell *occupancy_map = NULL;
 Person **all_persons_pointers = NULL;
+
 omp_lock_t *cell_locks = NULL;
+
 bool debug = false;
 
 /**
@@ -104,10 +106,10 @@ void init_population(Person *population)
     // Each thread will have its available coordinates and occupancy count
     int *cells_per_thread = malloc(NTHREADS * sizeof(int));
     int *people_per_thread = malloc(NTHREADS * sizeof(int));
-    int *cell_offset = malloc(NTHREADS * sizeof(int));
-    int *people_offset = malloc(NTHREADS * sizeof(int));
     int *immune_per_thread = malloc(NTHREADS * sizeof(int));
     int *infected_per_thread = malloc(NTHREADS * sizeof(int));
+    int *cell_offset = malloc(NTHREADS * sizeof(int));
+    int *people_offset = malloc(NTHREADS * sizeof(int));
 
     // Calculation of the number of cells each thread will handle
     for (int i = 0; i < NTHREADS; ++i)
@@ -271,7 +273,6 @@ void init_population(Person *population)
             {
                 p->susceptibility = gaussian_random(seed, S_AVG, 0.1f);
                 p->incubation_days = INCUBATION_DAYS + 1;
-                p->new_infected = false;
             }
             else
             {
@@ -290,10 +291,10 @@ void init_population(Person *population)
 
     free(cells_per_thread);
     free(people_per_thread);
-    free(cell_offset);
-    free(people_offset);
     free(immune_per_thread);
     free(infected_per_thread);
+    free(cell_offset);
+    free(people_offset);
 }
 
 /**
@@ -303,7 +304,8 @@ void init_population(Person *population)
  */
 void simulate_one_day(Person *population)
 {
-    int max_num_new_infected = NP - (int)(NP * IMM);
+    // Maximum number of persons that can change their status in one day, becoming infected or recovered.
+    int max_num_new_status = NP - (int)(NP * IMM);
 
     #pragma omp parallel
     {
@@ -311,7 +313,7 @@ void simulate_one_day(Person *population)
         int tid = omp_get_thread_num();
         unsigned int seed;
 
-        Person **local_newly_infected = malloc(sizeof(Person *) * max_num_new_infected);
+        Person **local_newly_changed = malloc(sizeof(Person *) * max_num_new_status);
         int local_newly_count = 0;
 
         #pragma omp for schedule(guided)
@@ -339,18 +341,17 @@ void simulate_one_day(Person *population)
                         // Acquire a lock for the neighbor's cell to prevent race conditions during access.
                         omp_set_lock(&LOCK(nx, ny));
 
-                        // For each neighbor, check if it is susceptible
                         for (int j = 0; j < AT(nx, ny).occupancy; j++)
                         {
                             Person *neighbor = AT(nx, ny).persons[j];
-                            if (!is_infected(neighbor) && !is_immune(neighbor) && !neighbor->new_infected)
+                            if (!is_infected(neighbor) && !is_immune(neighbor) && !is_newly_infected(neighbor) && !is_newly_recovered(neighbor))                            
                             {
                                 float infectivity = BETA * neighbor->susceptibility;
                                 if (infectivity > ITH)
                                 {
-                                    neighbor->new_infected = true;
+                                    neighbor->incubation_days = -1;
                                     // Newly infected persons are stored in a local array for later processing
-                                    local_newly_infected[local_newly_count++] = neighbor;
+                                    local_newly_changed[local_newly_count++] = neighbor;
                                 }
                             }
                         }
@@ -416,10 +417,18 @@ void simulate_one_day(Person *population)
 
                 if (prob < MU)
                 {
-                    p->incubation_days = 0;
-
                     if (rand_r(&seed) % 2 == 0)
+                    {
+                        // Become immune
+                        p->incubation_days = 0;
                         p->susceptibility = 0.0f;
+                    } 
+                    else
+                    {
+                        // Mark as newly recovered
+                        p->incubation_days = -2;
+                        local_newly_changed[local_newly_count++] = p;
+                    }  
                 }
                 else
                 {
@@ -435,12 +444,13 @@ void simulate_one_day(Person *population)
         // Process the newly infected persons, which can infect others on the next day.
         for (int i = 0; i < local_newly_count; i++)
         {
-            Person *p = local_newly_infected[i];
-            p->new_infected = false;
-            p->incubation_days = INCUBATION_DAYS + 1;
+            Person *p = local_newly_changed[i];
+            if (is_newly_infected(p))
+                p->incubation_days = INCUBATION_DAYS + 1;
+            else
+                p->incubation_days = 0;  
         }
-
-        free(local_newly_infected);
+        free(local_newly_changed);
     }
 }
 

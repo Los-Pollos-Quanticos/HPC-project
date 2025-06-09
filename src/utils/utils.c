@@ -43,7 +43,7 @@ bool is_infected(const Person *p)
 
 bool is_newly_infected(const Person *p)
 {
-    return p->incubation_days==-1;
+    return p->incubation_days == -1;
 }
 
 bool is_newly_recovered(const Person *p)

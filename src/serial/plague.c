@@ -87,6 +87,7 @@ void init_population(Person *population)
 
 void simulate_one_day(Person *population)
 {
+    // Maximum number of persons that can change their status in one day, becoming infected or recovered.
     int max_num_new_status = NP - (int)(NP * IMM);
     Person **newly_changed = malloc(sizeof(Person *) * max_num_new_status);
     int newly_count = 0;
@@ -163,20 +164,23 @@ void simulate_one_day(Person *population)
             float prob = (float)rand() / RAND_MAX;
             if (prob < MU)
             {
-                // mark as newly recovered
-                p->incubation_days = -2;
-                newly_changed[newly_count++] = p;
-
                 if (rand() % 2 == 0)
                 {
                     // become immune
+                    p->incubation_days = 0;
                     p->susceptibility = 0.0f;
+                }
+                else
+                {
+                    // mark as newly recovered
+                    p->incubation_days = -2;
+                    newly_changed[newly_count++] = p;
                 }
             }
             else
             {
+                // deceased
                 removePerson(p);
-                // die
                 p->x = -1;
                 p->y = -1;
                 p->incubation_days = 0;
@@ -188,13 +192,9 @@ void simulate_one_day(Person *population)
     {
         Person *p = newly_changed[i];
         if (is_newly_infected(p))
-        {
             p->incubation_days = INCUBATION_DAYS + 1;
-        }
         else
-        {
             p->incubation_days = 0;
-        }
     }
     free(newly_changed);
 }
