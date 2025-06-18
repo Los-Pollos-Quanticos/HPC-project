@@ -18,7 +18,7 @@ for size in "${grid_sizes[@]}"; do
 #SBATCH --time=00:40:00
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --partition=cuda
+#SBATCH --partition=cudatemp
 #SBATCH --mail-type=FAIL
 #SBATCH --output=test_cuda/128/cuda128_W${W}_NP${NP}_%j.out
 #SBATCH --gres=gpu:1
