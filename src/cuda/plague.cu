@@ -275,7 +275,7 @@ int main(int argc, char **argv)
     cudaMalloc(&d_cellSlots, W * H * MAXP_CELL * sizeof(int));
     cudaMalloc(&d_states, NP * sizeof(curandStatePhilox4_32_10_t));
 
-    int threads = 256;
+    int threads = 128;
     int blocks = (NP + threads - 1) / threads;
 
     init_curand_kernel<<<blocks, threads>>>(d_states, (unsigned long long)time(nullptr));

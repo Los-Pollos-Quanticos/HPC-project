@@ -20,5 +20,6 @@ cd src
 mkdir bin report test_cuda test_serial test_omp
 ```
 
+Slurm scripts are provided in the `src/` directory.
 
 Happy Simulating! 😀
